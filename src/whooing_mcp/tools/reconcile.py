@@ -15,6 +15,9 @@ from whooing_mcp.client import WhooingClient
 from whooing_mcp.csv_adapters import detect, known_issuers, parse
 from whooing_mcp.dates import date_diff_days, parse_yyyymmdd
 from whooing_mcp.models import ToolError
+from whooing_mcp.pdf_adapters import detect as pdf_detect
+from whooing_mcp.pdf_adapters import known_issuers as pdf_known_issuers
+from whooing_mcp.pdf_adapters import parse as pdf_parse
 
 
 # ---- whooing_csv_format_detect ------------------------------------------
@@ -142,6 +145,125 @@ async def reconcile_csv(
             "공식 MCP 의 add_entry 로 입력하세요. extra_in_whooing 은 "
             "후잉에는 있는데 CSV 에 없는 거래 — 환불/현금/타카드 등 정상일 "
             "수 있으니 자동 삭제 X."
+        ),
+    }
+
+
+# ---- whooing_pdf_format_detect ------------------------------------------
+
+
+async def pdf_format_detect(pdf_path: str) -> dict[str, Any]:
+    if not isinstance(pdf_path, str) or not pdf_path.strip():
+        raise ToolError("USER_INPUT", "pdf_path 가 비어있습니다.")
+    if not os.path.isabs(pdf_path):
+        raise ToolError("USER_INPUT", f"pdf_path 는 절대 경로여야 합니다: {pdf_path!r}")
+    if not os.path.exists(pdf_path):
+        raise ToolError("USER_INPUT", f"파일이 없습니다: {pdf_path}")
+
+    try:
+        d = pdf_detect(pdf_path)
+    except Exception as ex:
+        raise ToolError("USER_INPUT", f"PDF 읽기 실패: {ex}")
+
+    return {
+        "detected_issuer": d.detected_issuer,
+        "confidence": round(d.confidence, 3),
+        "first_page_excerpt": d.first_page_excerpt,
+        "supported_issuers": pdf_known_issuers(),
+        "note": (
+            "detected_issuer 가 None 이면 첫 페이지 텍스트에 알려진 카드사 "
+            "키워드 미발견. first_page_excerpt 를 보고 새 adapter 추가 또는 "
+            "기존 adapter 키워드 보강."
+        ),
+    }
+
+
+# ---- whooing_reconcile_pdf ----------------------------------------------
+
+
+async def reconcile_pdf(
+    client: WhooingClient,
+    pdf_path: str,
+    section_id: str,
+    issuer: str = "auto",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    tolerance_days: int = 2,
+    tolerance_amount: int = 0,
+) -> dict[str, Any]:
+    """CSV 의 reconcile_csv 와 동일한 흐름. PDF → CSVRow → 같은 매칭 알고리즘."""
+    if not os.path.isabs(pdf_path):
+        raise ToolError("USER_INPUT", f"pdf_path 는 절대 경로여야 합니다: {pdf_path!r}")
+    if not os.path.exists(pdf_path):
+        raise ToolError("USER_INPUT", f"파일이 없습니다: {pdf_path}")
+    if issuer != "auto" and issuer not in pdf_known_issuers():
+        raise ToolError(
+            "USER_INPUT",
+            f"지원하지 않는 PDF issuer: {issuer!r}. 지원: {pdf_known_issuers()} 또는 'auto'.",
+            supported=pdf_known_issuers(),
+        )
+    if tolerance_days < 0 or tolerance_days > 30:
+        raise ToolError("USER_INPUT", f"tolerance_days 는 0~30 (받음: {tolerance_days})")
+    if tolerance_amount < 0:
+        raise ToolError("USER_INPUT", f"tolerance_amount 는 0 이상 (받음: {tolerance_amount})")
+
+    try:
+        adapter_used, pdf_rows = pdf_parse(pdf_path, issuer=issuer)
+    except ValueError as ex:
+        raise ToolError("USER_INPUT", str(ex), supported=pdf_known_issuers())
+
+    if pdf_rows:
+        pdf_dates = [r.date for r in pdf_rows]
+        if start_date is None:
+            start_date = min(pdf_dates)
+        if end_date is None:
+            end_date = max(pdf_dates)
+    elif start_date is None or end_date is None:
+        return _empty_envelope(adapter_used, section_id, pdf_path,
+                               start_date, end_date, tolerance_days, tolerance_amount)
+
+    try:
+        parse_yyyymmdd(start_date)
+        parse_yyyymmdd(end_date)
+    except ValueError as ex:
+        raise ToolError("USER_INPUT", str(ex))
+    if start_date > end_date:
+        raise ToolError("USER_INPUT", f"start_date({start_date}) > end_date({end_date})")
+
+    fetch_start, fetch_end = _widen_range(start_date, end_date, tolerance_days)
+    entries = await client.list_entries(
+        section_id=section_id,
+        start_date=fetch_start,
+        end_date=fetch_end,
+    )
+
+    matched, pdf_remaining, whooing_remaining = _match(
+        pdf_rows, entries, tolerance_days, tolerance_amount
+    )
+
+    return {
+        "summary": {
+            "csv_total": len(pdf_rows),  # CSV 호환 필드명 유지 (dataclass)
+            "whooing_total": len(entries),
+            "matched_count": len(matched),
+            "missing_in_whooing_count": len(pdf_remaining),
+            "extra_in_whooing_count": len(whooing_remaining),
+        },
+        "matched": matched,
+        "missing_in_whooing": [asdict(r) for r in pdf_remaining],
+        "extra_in_whooing": whooing_remaining,
+        "adapter_used": adapter_used,
+        "input_type": "pdf",
+        "section_id": section_id,
+        "date_range": {"start": start_date, "end": end_date},
+        "params": {
+            "tolerance_days": tolerance_days,
+            "tolerance_amount": tolerance_amount,
+        },
+        "note": (
+            "PDF 추출 결과 기반. missing_in_whooing 항목은 LLM 이 사용자 확인 후 "
+            "공식 MCP add_entry 로 입력. extra_in_whooing 은 환불/현금/타카드/PDF 누락 "
+            "등 정상일 수 있음 — 자동 삭제 X."
         ),
     }
 

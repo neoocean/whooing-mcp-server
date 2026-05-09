@@ -29,7 +29,12 @@ from whooing_mcp.tools.pending import (
     enqueue_pending,
     list_pending,
 )
-from whooing_mcp.tools.reconcile import csv_format_detect, reconcile_csv
+from whooing_mcp.tools.reconcile import (
+    csv_format_detect,
+    pdf_format_detect,
+    reconcile_csv,
+    reconcile_pdf,
+)
 from whooing_mcp.tools.sms import parse_payment_sms
 
 log = logging.getLogger("whooing_mcp")
@@ -264,6 +269,52 @@ def build_mcp() -> FastMCP:
     async def whooing_csv_format_detect(csv_path: str) -> dict:
         try:
             return await csv_format_detect(csv_path)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "카드사 명세서 PDF 파일을 후잉 가계부 entries 와 매칭해 누락/잉여를 "
+            "반환합니다. issuer 는 'auto' (PDF 첫 페이지 텍스트로 탐지), "
+            "'shinhan_card', 'hyundai_card' 중 하나. 텍스트 추출 가능 PDF 만 "
+            "지원 (이미지/스캔 PDF 는 OCR 필요 — 미지원). 읽기 전용 — 누락 항목 "
+            "자동 입력 X."
+        )
+    )
+    async def whooing_reconcile_pdf(
+        pdf_path: str,
+        issuer: str = "auto",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        section_id: str | None = None,
+        tolerance_days: int = 2,
+        tolerance_amount: int = 0,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await reconcile_pdf(
+                client,
+                pdf_path=pdf_path,
+                section_id=sid,
+                issuer=issuer,
+                start_date=start_date,
+                end_date=end_date,
+                tolerance_days=tolerance_days,
+                tolerance_amount=tolerance_amount,
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "PDF 파일 첫 페이지 텍스트로 카드사 추정 (디버깅용). "
+            "whooing_reconcile_pdf 가 issuer=auto 로 매칭 실패 시 first_page_excerpt "
+            "보고 새 adapter 추가/보강 판단."
+        )
+    )
+    async def whooing_pdf_format_detect(pdf_path: str) -> dict:
+        try:
+            return await pdf_format_detect(pdf_path)
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 

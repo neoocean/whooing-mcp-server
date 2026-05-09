@@ -26,6 +26,21 @@ class DetectResult:
     column_mapping_proposed: dict[str, str | None]
 
 
+def find_header_row(rows: list[list[str]], scan_first_n: int = 10) -> int:
+    """첫 N 행 중 '실제 헤더'로 보이는 행의 인덱스 반환.
+
+    카드사 CSV 는 흔히 0~3 줄의 metadata (제목, 명세 기간 등) 이후 진짜 헤더가
+    온다. heuristic: non-empty cell 이 3개 이상 + 첫 cell 이 비어있지 않은 행.
+
+    매칭 없으면 0 (= 기존 동작).
+    """
+    for i, row in enumerate(rows[:scan_first_n]):
+        non_empty = sum(1 for c in row if c and c.strip())
+        if non_empty >= 3 and row[0] and row[0].strip():
+            return i
+    return 0
+
+
 def read_csv(path: str, max_rows: int | None = None) -> list[list[str]]:
     """utf-8 우선, 실패 시 cp949 fallback (한국 카드사 export 의 흔한 인코딩)."""
     raw_bytes = open(path, "rb").read()

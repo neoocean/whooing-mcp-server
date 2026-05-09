@@ -99,10 +99,37 @@ def test_parse_with_explicit_issuer():
 
 def test_parse_unknown_issuer_raises():
     with pytest.raises(ValueError):
-        parse(str(FIXTURES / "shinhan_sample.csv"), issuer="hyundai_card")
+        parse(str(FIXTURES / "shinhan_sample.csv"), issuer="lotte_card")
 
 
 def test_known_issuers():
     issuers = known_issuers()
-    assert "shinhan_card" in issuers
-    assert "kookmin_card" in issuers
+    for expected in ("shinhan_card", "kookmin_card", "hyundai_card", "samsung_card"):
+        assert expected in issuers, f"missing: {expected}"
+
+
+# ---- 신규 issuer (CL #12) ---------------------------------------------
+
+
+def test_detect_hyundai():
+    d = detect(str(FIXTURES / "hyundai_sample.csv"))
+    assert d.detected_issuer == "hyundai_card"
+
+
+def test_detect_samsung():
+    d = detect(str(FIXTURES / "samsung_sample.csv"))
+    assert d.detected_issuer == "samsung_card"
+
+
+def test_parse_hyundai_rows():
+    issuer, rows = parse(str(FIXTURES / "hyundai_sample.csv"))
+    assert issuer == "hyundai_card"
+    assert len(rows) == 3
+    assert rows[0].date == "20260509"
+    assert rows[0].amount == 6200
+
+
+def test_parse_samsung_rows():
+    issuer, rows = parse(str(FIXTURES / "samsung_sample.csv"))
+    assert issuer == "samsung_card"
+    assert len(rows) == 3

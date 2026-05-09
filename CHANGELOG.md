@@ -5,10 +5,40 @@
 
 ## Unreleased
 
-* P1 CSV adapter 추가 (현대 / 삼성).
-* P1 **PDF 임포트 지원** (신규) — pdfplumber 기반 + `whooing_reconcile_pdf` /
-  `whooing_pdf_format_detect`.
 * P2 `whooing_monthly_close` (audit + dedup + reconcile + suggest_category 합성).
+
+## v0.1.2 — 2026-05-09
+
+P1 CSV / PDF 확장.
+
+### Added
+
+* CSV adapters: `hyundai_card`, `samsung_card` (CL 50668).
+* **PDF 임포트 지원** — pdfplumber 기반:
+  * `pdf_adapters/{shinhan,hyundai}_card.py` — 텍스트 추출 가능 PDF 만 지원.
+  * 도구 2종: `whooing_reconcile_pdf`, `whooing_pdf_format_detect`.
+* CSV detect: 첫 metadata 행(제목 등)을 스킵하고 진짜 header 행 자동 발견
+  (`find_header_row` 헬퍼). 카드사명이 metadata 에 있으면 issuer 추정 보너스.
+* dev dep: `reportlab` (fixture 재생성 시만 필요).
+* runtime dep: `pdfplumber>=0.11`.
+
+### Test fixtures
+
+* `tests/fixtures/csv/{hyundai,samsung}_sample.csv` (synthetic, 제목 행 포함)
+* `tests/fixtures/pdf/{shinhan,hyundai}_sample.pdf` (synthetic, reportlab
+  생성 — `tests/_make_pdf_fixture.py` 가 재생성)
+
+### Tools after this release
+
+12개 — audit, parse_payment_sms, find_duplicates, reconcile_csv,
+csv_format_detect, **reconcile_pdf**, **pdf_format_detect**,
+suggest_category, enqueue_pending, list_pending, confirm_pending,
+dismiss_pending.
+
+### Limitations
+
+* 텍스트 추출 가능 PDF 만 지원 (이미지/스캔 PDF 는 OCR 필요 — deferred).
+* 비밀번호 PDF 미지원 (지원 시 ToolError 명확화 — 향후 보강 가능).
 
 ## v0.1.1 — 2026-05-09
 

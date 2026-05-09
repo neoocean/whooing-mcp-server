@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from whooing_mcp.csv_adapters.base import CSVRow, parse_date, parse_money, read_csv
+from whooing_mcp.csv_adapters.base import CSVRow, find_header_row, parse_date, parse_money, read_csv
 
 ISSUER = "shinhan_card"
 
@@ -60,7 +60,8 @@ def parse_csv(path: str) -> list[CSVRow]:
     rows = read_csv(path)
     if not rows:
         return []
-    header = rows[0]
+    header_idx = find_header_row(rows)
+    header = rows[header_idx]
     di = _find_col(header, _DATE_KEYWORDS)
     ai = _find_col(header, _AMOUNT_KEYWORDS)
     mi = _find_col(header, _MERCHANT_KEYWORDS)
@@ -71,7 +72,7 @@ def parse_csv(path: str) -> list[CSVRow]:
         )
 
     out: list[CSVRow] = []
-    for r in rows[1:]:
+    for r in rows[header_idx + 1:]:
         if not r or all(not c.strip() for c in r):
             continue
         try:
