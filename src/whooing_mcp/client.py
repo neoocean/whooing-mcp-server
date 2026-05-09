@@ -142,8 +142,15 @@ class WhooingClient:
         section_id: str,
         start_date: str,
         end_date: str,
+        limit: int = 1000,
     ) -> list[dict[str, Any]]:
-        """범위가 1년 초과면 자동 분할 후 병합 (DESIGN §4.2)."""
+        """범위가 1년 초과면 자동 분할 후 병합 (DESIGN §4.2).
+
+        후잉 응답 shape (live 검증, 2026-05-09):
+          results = {reports: [...], rows: [<entry>, ...]}
+          default limit = 20 — 본 wrapper 는 1000 (조용히 모두 가져옴).
+          1000 초과는 별도 paginate (현재 미구현 — 로그 경고).
+        """
         from whooing_mcp.dates import split_yearly_ranges
 
         ranges = split_yearly_ranges(start_date, end_date)
@@ -155,9 +162,16 @@ class WhooingClient:
                     "section_id": section_id,
                     "start_date": s,
                     "end_date": e,
+                    "limit": limit,
                 },
             )
-            out.extend(self._normalize_collection(results, key="entries"))
+            chunk = self._normalize_collection(results, key="rows")
+            if len(chunk) == limit:
+                log.warning(
+                    "list_entries (%s ~ %s): hit limit=%d — pagination not implemented, "
+                    "may be missing entries", s, e, limit,
+                )
+            out.extend(chunk)
         return out
 
     @staticmethod
