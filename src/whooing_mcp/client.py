@@ -137,6 +137,36 @@ class WhooingClient:
         results = await self._get("/sections.json")
         return self._normalize_collection(results, key="sections")
 
+    async def list_accounts(self, section_id: str) -> dict[str, Any]:
+        """섹션의 계정 목록. 응답 shape: {assets: [...], liabilities: [...],
+        capital: [...], expenses: [...], income: [...]}.
+
+        본 메서드는 dict 그대로 반환 — type 별로 grouping 되어 있음.
+        flatten 헬퍼 (`flatten_accounts`) 가 [(id, name, type)] 리스트로 변환.
+        """
+        results = await self._get("/accounts.json", params={"section_id": section_id})
+        if isinstance(results, dict):
+            return results
+        return {}
+
+    @staticmethod
+    def flatten_accounts(accounts_dict: dict[str, Any]) -> list[dict[str, str]]:
+        """{assets: [...]} → [{account_id, title, type}, ...]."""
+        out: list[dict[str, str]] = []
+        for type_key, items in accounts_dict.items():
+            if not isinstance(items, list):
+                continue
+            for a in items:
+                aid = a.get("account_id") or a.get("id")
+                if not aid:
+                    continue
+                out.append({
+                    "account_id": str(aid),
+                    "title": a.get("title") or a.get("name") or "",
+                    "type": type_key,
+                })
+        return out
+
     async def list_entries(
         self,
         section_id: str,

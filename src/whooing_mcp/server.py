@@ -30,6 +30,7 @@ from whooing_mcp.tools.annotations import (
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.delete import delete_entries
+from whooing_mcp.tools.pdf_import import import_pdf_statement
 from whooing_mcp.tools.dedup import find_duplicates
 from whooing_mcp.tools.monthly_close import monthly_close
 from whooing_mcp.tools.pending import (
@@ -500,6 +501,44 @@ def build_mcp() -> FastMCP:
             client, sid = await _ensure_client_and_section(section_id)
             return await find_entries_by_hashtag(
                 client, hashtag=hashtag, section_id=sid, lookback_days=lookback_days
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "PDF 카드명세서를 후잉에 import 합니다. dedup (이미 ledger 에 있는 거래는 "
+            "skip) + auto-categorize (suggest_category 통해 l_account 추정) + 공식 MCP "
+            "통한 안전한 insert + statement_import_log 기록 + dry_run safety default. "
+            "r_account_id 필수 (PDF 카드와 매핑되는 후잉 부채/자산 계정 — 예 'x80')."
+        )
+    )
+    async def whooing_import_pdf_statement(
+        pdf_path: str,
+        r_account_id: str,
+        issuer: str = "auto",
+        section_id: str | None = None,
+        card_label: str | None = None,
+        dedup_tolerance_days: int = 2,
+        auto_categorize: bool = True,
+        fallback_l_account_id: str = "x50",
+        dry_run: bool = True,
+        confirm_insert: bool = False,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await import_pdf_statement(
+                client,
+                pdf_path=pdf_path,
+                section_id=sid,
+                r_account_id=r_account_id,
+                issuer=issuer,
+                card_label=card_label,
+                dedup_tolerance_days=dedup_tolerance_days,
+                auto_categorize=auto_categorize,
+                fallback_l_account_id=fallback_l_account_id,
+                dry_run=dry_run,
+                confirm_insert=confirm_insert,
             )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}

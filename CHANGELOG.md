@@ -8,6 +8,22 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## Unreleased — 2026-05-09 (formal PDF import tool)
+
+### Added
+
+* `src/whooing_mcp/tools/pdf_import.py` — 정식 도구 `whooing_import_pdf_statement`.
+  - PDF 파싱 (pdf_adapters) + dedup (paginated client.list_entries) +
+    auto-categorize (suggest_category) + 공식 MCP entries-create 통한 안전 insert
+    + statement_import_log tracking + dry_run safety default + confirm_insert 가드.
+  - CL 50708 의 일회용 스크립트 (`tests/_pdf_import_2026_04.py`) 일반화.
+* `src/whooing_mcp/client.py` — `list_accounts(section_id)` + `flatten_accounts()`
+  헬퍼. PDF import 의 account_id ↔ type/name 매핑용.
+
+### Tools after this release
+
+20개 — 신규 `whooing_import_pdf_statement` 추가.
+
 ## Unreleased — 2026-05-09 (delete via official MCP)
 
 ### Added
