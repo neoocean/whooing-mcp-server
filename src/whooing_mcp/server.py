@@ -32,13 +32,43 @@ log = logging.getLogger("whooing_mcp")
 
 
 def _load_env() -> None:
-    """Load .env from cwd, then ~/.config/whooing-mcp/.env (cwd 우선)."""
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        load_dotenv(cwd_env)
-    user_env = Path.home() / ".config" / "whooing-mcp" / ".env"
-    if user_env.exists():
-        load_dotenv(user_env, override=False)
+    """`.env` 탐색 우선순위 (먼저 발견된 1개만 로드 — DESIGN §8.2):
+
+      1. $WHOOING_MCP_ENV           (명시 override 경로)
+      2. Path.cwd() / ".env"        (전통적 위치)
+      3. <project root> / ".env"    (cwd 무관 — editable install 시 동작)
+      4. ~/.config/whooing-mcp/.env (사용자 전역)
+
+    Claude Desktop / Claude Code 는 cwd 가 프로젝트가 아닐 때가 많아 (3)
+    이 결정적이다. `__file__` 이 `<project>/src/whooing_mcp/server.py` 이므로
+    `parents[2]` 가 프로젝트 루트.
+    """
+    candidates: list[Path] = []
+
+    explicit = os.getenv("WHOOING_MCP_ENV")
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
+    candidates.append(Path.cwd() / ".env")
+
+    try:
+        project_root = Path(__file__).resolve().parents[2]
+        candidates.append(project_root / ".env")
+    except IndexError:
+        pass  # __file__ 위치가 예상과 다른 install (wheel 등)
+
+    candidates.append(Path.home() / ".config" / "whooing-mcp" / ".env")
+
+    for c in candidates:
+        if c.exists():
+            load_dotenv(c)
+            log.info("loaded .env from %s", c)
+            return
+
+    log.warning(
+        ".env not found. Tried: %s. WHOOING_AI_TOKEN must be set in process env.",
+        [str(c) for c in candidates],
+    )
 
 
 def _build_client() -> tuple[WhooingClient, str | None]:

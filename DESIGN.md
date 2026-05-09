@@ -400,10 +400,24 @@ JSON Schema, launchd 통합 패턴 정착.
 
 ### §8.2 로딩 우선순위
 
-1. 프로세스 환경변수 (Claude Desktop config 의 `env`)
-2. 워킹 디렉터리의 `.env`
-3. `~/.config/whooing-mcp/.env`
-4. **로깅 시 절대 출력 금지**, `auth.py.__repr__` 마스크
+`.env` 탐색은 첫 매칭 1개만 사용 (DESIGN v0.2 정책 — 자격증명을 한 곳에서만
+관리해 회수/갱신을 단순화):
+
+1. `$WHOOING_MCP_ENV` (명시 override 경로 — 테스트/스테이징 분리용)
+2. `Path.cwd() / ".env"` (전통적 위치)
+3. `<project root> / ".env"` (cwd 무관 — `__file__` 기반,
+   editable install 가정. Claude Desktop 처럼 cwd 가 프로젝트가 아닐 때 결정적)
+4. `~/.config/whooing-mcp/.env` (사용자 전역)
+
+프로세스 환경변수는 `.env` 로딩 후에도 살아있다 (override=True). Claude
+Desktop config 의 `env` block 으로 토큰을 박는 옵션은 **권장하지 않음** —
+`.env` 정책 위반 + cross-machine 동기화 어려움.
+
+공식 MCP (mcp-remote) 도 같은 정책: `bin/whooing-mcp-remote.sh` 가 (1)~(4)
+순서로 `.env` 를 찾아 `WHOOING_AI_TOKEN` 을 추출, `--header X-API-Key:` 로
+전달.
+
+**로깅 시 토큰값 절대 출력 금지**, `auth.py.__repr__` 마스크 (§13).
 
 ### §8.3 토큰 회수
 

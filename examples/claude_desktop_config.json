@@ -1,25 +1,15 @@
 {
-  "_comment": "공식 후잉 MCP + 본 wrapper 두 개를 함께 등록. 같은 AI 토큰을 양쪽에 공급.",
+  "_comment_overall": "공식 후잉 MCP + 본 wrapper 두 개를 함께 등록. 자격증명은 양쪽 모두 .env 한 곳에서 읽음 — config 에 토큰 직접 박지 않음.",
+  "_env_location": ".env 탐색 우선순위: $WHOOING_MCP_ENV → <project>/.env → ~/.config/whooing-mcp/.env",
   "mcpServers": {
     "whooing": {
-      "_comment": "후잉 공식 MCP — 거래 CRUD, 보고서, 예산 등 기본 기능 제공",
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://whooing.com/mcp",
-        "--header",
-        "X-API-Key: __eyJh..."
-      ]
+      "_comment": "후잉 공식 MCP. wrapper 스크립트가 .env 의 WHOOING_AI_TOKEN 을 읽어 mcp-remote 의 X-API-Key 헤더로 넘긴다.",
+      "command": "/abs/path/to/whooing-mcp-server/bin/whooing-mcp-remote.sh"
     },
     "whooing-extras": {
-      "_comment": "본 wrapper — audit / dedup / SMS parser / CSV reconcile",
-      "command": "python",
-      "args": ["-m", "whooing_mcp"],
-      "env": {
-        "WHOOING_AI_TOKEN": "__eyJh...",
-        "WHOOING_SECTION_ID": ""
-      }
+      "_comment": "본 wrapper (audit / dedup / SMS parser / CSV reconcile). server.py 가 .env 를 자동 탐지하므로 env block 불필요.",
+      "command": "/abs/path/to/whooing-mcp-server/.venv/bin/python",
+      "args": ["-m", "whooing_mcp"]
     }
   }
 }
