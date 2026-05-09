@@ -142,37 +142,80 @@ class WhooingClient:
         section_id: str,
         start_date: str,
         end_date: str,
-        limit: int = 1000,
     ) -> list[dict[str, Any]]:
-        """범위가 1년 초과면 자동 분할 후 병합 (DESIGN §4.2).
+        """후잉 entries fetch — 자동 분할 (1년 초과 + 100-cap pagination).
 
-        후잉 응답 shape (live 검증, 2026-05-09):
+        후잉 API 의 response shape (live 검증, 2026-05-09):
           results = {reports: [...], rows: [<entry>, ...]}
-          default limit = 20 — 본 wrapper 는 1000 (조용히 모두 가져옴).
-          1000 초과는 별도 paginate (현재 미구현 — 로그 경고).
+          server-side hard cap = 100 rows per request (`limit` param 무시).
+          → 100 받으면 날짜 범위가 더 큰 가능성 — bisection 으로 분할.
+
+        DESIGN §4.2 (1년 분할) + 100-cap pagination 결합.
         """
         from whooing_mcp.dates import split_yearly_ranges
 
         ranges = split_yearly_ranges(start_date, end_date)
         out: list[dict[str, Any]] = []
+        seen_ids: set = set()
         for s, e in ranges:
-            results = await self._get(
-                "/entries.json",
-                params={
-                    "section_id": section_id,
-                    "start_date": s,
-                    "end_date": e,
-                    "limit": limit,
-                },
-            )
-            chunk = self._normalize_collection(results, key="rows")
-            if len(chunk) == limit:
-                log.warning(
-                    "list_entries (%s ~ %s): hit limit=%d — pagination not implemented, "
-                    "may be missing entries", s, e, limit,
-                )
-            out.extend(chunk)
+            chunks = await self._list_entries_chunked(section_id, s, e)
+            for entry in chunks:
+                eid = entry.get("entry_id")
+                if eid and eid in seen_ids:
+                    continue  # dedup across chunks
+                if eid:
+                    seen_ids.add(eid)
+                out.append(entry)
         return out
+
+    async def _list_entries_chunked(
+        self,
+        section_id: str,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict[str, Any]]:
+        """Single date-range fetch with bisection if 100-cap hit."""
+        from whooing_mcp.dates import date_diff_days
+        from datetime import datetime, timedelta
+
+        results = await self._get(
+            "/entries.json",
+            params={
+                "section_id": section_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": 100,
+            },
+        )
+        chunk = self._normalize_collection(results, key="rows")
+
+        # 100 미만 → 모두 가져옴
+        if len(chunk) < 100:
+            return chunk
+
+        # 100 hit — date range bisect
+        if start_date == end_date:
+            log.warning(
+                "list_entries: %s 단일 일자에 100건 초과 (cap 도달) — "
+                "100건만 반환됨 (서버가 추가 pagination 미지원). 누락 가능.",
+                start_date,
+            )
+            return chunk
+
+        # 중간 지점 계산
+        s_dt = datetime.strptime(start_date, "%Y%m%d")
+        e_dt = datetime.strptime(end_date, "%Y%m%d")
+        mid_dt = s_dt + (e_dt - s_dt) // 2
+        mid = mid_dt.strftime("%Y%m%d")
+        next_dt = mid_dt + timedelta(days=1)
+        next_str = next_dt.strftime("%Y%m%d")
+
+        log.debug("list_entries: bisect %s~%s → [%s~%s, %s~%s]",
+                  start_date, end_date, start_date, mid, next_str, end_date)
+
+        left = await self._list_entries_chunked(section_id, start_date, mid)
+        right = await self._list_entries_chunked(section_id, next_str, end_date)
+        return left + right
 
     @staticmethod
     def _normalize_collection(results: Any, key: str) -> list[dict[str, Any]]:

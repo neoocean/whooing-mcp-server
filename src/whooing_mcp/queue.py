@@ -20,7 +20,7 @@ from typing import Any
 from whooing_mcp.dates import KST
 from datetime import datetime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def default_queue_path() -> Path:
@@ -84,7 +84,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_pending_queued_at
             ON pending(queued_at);
 
-        -- v2: entry annotations (본 CL)
+        -- v2: entry annotations (CL 50678)
         CREATE TABLE IF NOT EXISTS entry_annotations (
             entry_id TEXT PRIMARY KEY,
             section_id TEXT,
@@ -100,6 +100,38 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                 ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_hashtags_tag ON entry_hashtags(tag);
+
+        -- v3: PDF/CSV/외부 명세서 import 추적 (본 CL)
+        --     입력한 항목이 어느 PDF, 어느 줄에서 왔는지 + 입력 결과 후잉 entry_id
+        --     역추적해 중복 방지 / audit / undo 가능.
+        CREATE TABLE IF NOT EXISTS statement_import_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_file TEXT NOT NULL,           -- PDF / CSV 파일 경로
+            source_kind TEXT NOT NULL,           -- 'pdf' | 'csv'
+            statement_period_start TEXT,         -- YYYYMMDD (명세서 기간)
+            statement_period_end TEXT,
+            issuer TEXT,                         -- 'shinhan_card' / 'hana_card' 등
+            card_label TEXT,                     -- 'VISA3698' / 'MASTER2991' 등 사용자 표기
+            entry_date TEXT NOT NULL,            -- YYYYMMDD (사용일)
+            merchant TEXT NOT NULL,              -- 가맹점
+            original_amount INTEGER NOT NULL,    -- KRW 이용금액 (외화는 카드사 변환된 KRW)
+            fee_amount INTEGER NOT NULL DEFAULT 0,  -- KRW 해외이용수수료
+            total_amount INTEGER NOT NULL,       -- original + fee (실 후잉 입력 금액)
+            currency TEXT NOT NULL DEFAULT 'KRW',  -- 'KRW' | 'USD' | ...
+            foreign_amount REAL,                 -- 외화 금액 (현지 통화)
+            exchange_rate REAL,                  -- 카드사 환율 (또는 lookup 환율)
+            section_id TEXT NOT NULL,
+            l_account_id TEXT NOT NULL,
+            r_account_id TEXT NOT NULL,
+            whooing_entry_id TEXT,               -- POST 성공 시 entry_id (없으면 실패/dry-run)
+            status TEXT NOT NULL,                -- 'inserted' | 'failed' | 'dry_run'
+            imported_at TEXT NOT NULL,           -- ISO 8601 KST
+            error_message TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_source ON statement_import_log(source_file);
+        CREATE INDEX IF NOT EXISTS idx_import_entry_date ON statement_import_log(entry_date);
+        CREATE INDEX IF NOT EXISTS idx_import_whooing_entry ON statement_import_log(whooing_entry_id);
 
         -- meta
         CREATE TABLE IF NOT EXISTS schema_meta (

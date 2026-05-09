@@ -8,6 +8,32 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## Unreleased — 2026-05-09 (PDF import session)
+
+### Added
+
+* `src/whooing_mcp/queue.py` SCHEMA_VERSION 2 → 3: `statement_import_log`
+  테이블 신규. 카드명세서 PDF/CSV import 시 어느 파일/라인 → 어느 후잉
+  entry_id 로 들어갔는지 audit trail. 향후 정식 import 도구 (deferred)
+  의 backing store.
+* `tests/_pdf_import_2026_04.py` — 2026-04 하나카드 명세서 import
+  일회용 스크립트. 향후 정식 `whooing_import_pdf_statement` 도구의 reference.
+* `tests/_probe_s9046.py` — accounts/entries 구조 탐색 helper.
+
+### Fixed (Critical)
+
+* `client.list_entries` — 후잉 server-side 100-cap 발견 → bisection
+  pagination 구현. 이전엔 `limit=1000` 줘도 100 만 반환되어, 한 달치 거래
+  > 100인 활발한 ledger 에서 누락 발생. 본 fix 후 122건 등 정상 반환.
+* (직전 git c297054 의 `entries`→`rows` fix 와 함께 확인된 버그.)
+
+### Known issues / TODO
+
+* 후잉 REST API 의 DELETE entry 호출 형식 미확정 — 5+ 패턴 시도 모두
+  실패 ("section_id parameter is required" 또는 "Unknown method").
+  현재 wrapper 는 read-only 라 영향 X, 사용자가 공식 MCP 또는 web UI
+  로 처리. 향후 정식 도구화 시 후잉 운영자에게 문의 필요.
+
 ## v0.1.7 — 2026-05-09
 
 옵션 설정 파일 layer 도입.
