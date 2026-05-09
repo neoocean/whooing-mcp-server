@@ -18,8 +18,8 @@ from whooing_mcp.attachments import (
     upsert_attachment,
 )
 from whooing_mcp.models import ToolError
-from whooing_mcp.p4_sync import sync_db_to_p4
-from whooing_mcp.queue import open_db
+from whooing_mcp.p4_sync import sync_db_to_p4, sync_paths_to_p4
+from whooing_mcp.queue import default_queue_path, open_db
 
 
 # ---- attach_file_to_entry ---------------------------------------------
@@ -99,8 +99,21 @@ async def attach_file_to_entry(
             note=note,
         )
 
-    sync = sync_db_to_p4(
-        f"attachment.attach (entry={entry_id}, file={original_filename})"
+    # db + (옵션) 새 첨부파일 모두 한 CL 로 sync.
+    # rel_path 는 위에서 'attachments/files/...' (프로젝트 루트 상대) 또는
+    # 원본 absolute path 로 세팅됨. p4 add/edit 에는 absolute 가 필요하므로 변환.
+    sync_paths = [default_queue_path()]
+    if copy:
+        rel_p = Path(rel_path)
+        if rel_p.is_absolute():
+            sync_paths.append(rel_p)
+        else:
+            project_root = Path(__file__).resolve().parents[3]
+            sync_paths.append(project_root / rel_path)
+
+    sync = sync_paths_to_p4(
+        f"attachment.attach (entry={entry_id}, file={original_filename})",
+        paths=sync_paths,
     )
     return {
         "attachment": {

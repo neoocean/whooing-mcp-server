@@ -101,12 +101,22 @@ def test_skip_when_p4_unavailable(tmp_db_in_path, monkeypatch):
     assert out["skipped"] is True
 
 
-def test_skip_when_db_not_in_depot(tmp_db_in_path, monkeypatch):
+def test_db_not_in_depot_now_added(tmp_db_in_path, monkeypatch):
+    """v0.1.10 변경: depot 미등록이면 skip 대신 자동 add (sync_paths_to_p4)."""
     monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
     monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: False)
-    out = p4_sync.sync_db_to_p4("test")
-    assert out["skipped"] is True
-    assert "미등록" in out["message"]
+    # _detect_p4_action 내부에서 reconcile -n -a 호출 → "opened for add" 가짜 응답
+    _mock_subprocess(monkeypatch, [
+        (0, "//.../db.sqlite - opened for add", ""),  # reconcile -n -a
+        (0, "Change 100 created.", ""),                # p4 change -i
+        (0, "opened for add", ""),                     # p4 add -c -t binary
+        (0, "Change 100 submitted.", ""),              # p4 submit -c
+    ])
+    out = p4_sync.sync_db_to_p4("first sync")
+    assert out["ok"] is True
+    assert out["skipped"] is False
+    assert out["cl"] == 100
+    assert out["files"][0]["action"] == "add"
 
 
 def test_skip_when_no_changes(tmp_db_in_path, monkeypatch):
@@ -179,18 +189,14 @@ def test_reconcile_to_edit_pattern_also_recognized(tmp_db_in_path, monkeypatch):
 # ---- _build_description -----------------------------------------------
 
 
-def test_description_includes_action_and_diff(tmp_db_in_path):
-    desc = p4_sync._build_description("annotation.set (entry=e1, tags=[식비])", "diff stuff")
+def test_description_includes_action_and_files(tmp_db_in_path):
+    """v0.1.10 변경: _build_description signature: (action, files_to_open list)."""
+    from pathlib import Path
+    files = [(Path("/tmp/db.sqlite"), "edit"), (Path("/tmp/foo.pdf"), "add")]
+    desc = p4_sync._build_description("annotation.set (entry=e1, tags=[식비])", files)
     assert "annotation.set" in desc
-    assert "diff stuff" in desc
-    assert ".sqlite" in desc
-    assert "GitHub 으로는 가지 않음" in desc
-
-
-def test_description_truncates_long_diff(tmp_db_in_path):
-    long_diff = "x" * 1000
-    desc = p4_sync._build_description("test", long_diff)
-    # diff_summary 는 500 + '...' 로 truncate
-    assert "..." in desc
-    # 전체 description 길이는 합리적
-    assert len(desc) < 2000
+    assert "db.sqlite" in desc
+    assert "foo.pdf" in desc
+    assert "edit" in desc
+    assert "add" in desc
+    assert "GitHub" in desc
