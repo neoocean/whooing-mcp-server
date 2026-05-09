@@ -460,7 +460,9 @@ def _log_one(
     whooing_entry_id: str | None,
     status: str,
     error_message: str | None,
+    source_kind: str = "pdf",
 ) -> int:
+    """statement_import_log 1행 insert. source_kind 는 'pdf'|'csv'|'html'."""
     fee = pdf_row.get("fee", 0)
     is_foreign = fee > 0
     with open_db() as conn:
@@ -472,7 +474,7 @@ def _log_one(
                 section_id, l_account_id, r_account_id,
                 whooing_entry_id, status, imported_at, error_message, notes)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (pdf_path, "pdf", period_start, period_end,
+            (pdf_path, source_kind, period_start, period_end,
              adapter_used, card_label,
              pdf_row["date"], pdf_row["merchant"],
              pdf_row["amount"], fee, pdf_row["amount"] + fee,

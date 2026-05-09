@@ -30,6 +30,7 @@ from whooing_mcp.tools.annotations import (
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.delete import delete_entries
+from whooing_mcp.tools.html_import import import_html_statement
 from whooing_mcp.tools.pdf_import import import_pdf_statement
 from whooing_mcp.tools.dedup import find_duplicates
 from whooing_mcp.tools.monthly_close import monthly_close
@@ -501,6 +502,46 @@ def build_mcp() -> FastMCP:
             client, sid = await _ensure_client_and_section(section_id)
             return await find_entries_by_hashtag(
                 client, hashtag=hashtag, section_id=sid, lookback_days=lookback_days
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "HTML 카드 보안메일 (예: 하나카드 CryptoJS AES 암호화 .html) 을 복호화 + "
+            "import. Playwright 헤드리스 Chromium 으로 client-side 복호화 → DOM 에서 "
+            "거래 추출 → dedup + auto-categorize + 공식 MCP entries-create. password 는 "
+            "환경변수 (default: WHOOING_HANACARD_PASSWORD) 에서 읽음. dry_run safety default."
+        )
+    )
+    async def whooing_import_html_statement(
+        html_path: str,
+        r_account_id: str,
+        password_env_var: str = "WHOOING_HANACARD_PASSWORD",
+        issuer: str = "auto",
+        section_id: str | None = None,
+        card_label: str | None = None,
+        dedup_tolerance_days: int = 2,
+        auto_categorize: bool = True,
+        fallback_l_account_id: str = "x50",
+        dry_run: bool = True,
+        confirm_insert: bool = False,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await import_html_statement(
+                client,
+                html_path=html_path,
+                section_id=sid,
+                r_account_id=r_account_id,
+                password_env_var=password_env_var,
+                issuer=issuer,
+                card_label=card_label,
+                dedup_tolerance_days=dedup_tolerance_days,
+                auto_categorize=auto_categorize,
+                fallback_l_account_id=fallback_l_account_id,
+                dry_run=dry_run,
+                confirm_insert=confirm_insert,
             )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}

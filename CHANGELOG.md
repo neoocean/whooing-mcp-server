@@ -8,6 +8,34 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## Unreleased — 2026-05-09 (formal HTML statement import tool)
+
+### Added
+
+* `src/whooing_mcp/html_adapters/` — 신규 module (pdf_adapters/ 평행 구조).
+  * `base.py`: `HTMLDetectResult`, `HtmlDecryptError`, `decrypt_html_with_playwright()` (lazy-import).
+  * `hanacard_secure_mail.py`: 하나카드 보안메일 (CryptoJS AES) 어댑터.
+* `src/whooing_mcp/tools/html_import.py` — 도구 `whooing_import_html_statement`.
+  - Playwright 헤드리스 Chromium 으로 client-side 복호화 → DOM → 거래 추출
+  - PDF import 와 동일한 dedup + auto-categorize + 공식 MCP entries-create 파이프라인 재사용
+  - `password_env_var` (default 'WHOOING_HANACARD_PASSWORD') 에서 패스워드 로드
+  - dry_run safety default + confirm_insert 가드
+* `pyproject.toml`: runtime deps `beautifulsoup4>=4.12`, `playwright>=1.45` 추가
+  (Chromium 다운로드는 `playwright install chromium` — 1회).
+* `tools/pdf_import._log_one()` 에 `source_kind` 인자 추가 (기본 'pdf'). HTML 도구는 'html' 명시.
+
+### Tools after this release
+
+21개 — 신규 `whooing_import_html_statement` (#21).
+
+### Known limitations (v0.x)
+
+* hanacard_secure_mail 파서는 정형 거래 섹션 (5-cell 패턴) 에 최적화. **해외이용내역 상세** 섹션
+  (date / 국가 / 도시 / merchant / currency / amount / rate / KRW / fee 컬럼) 에서는
+  카드번호 같은 값이 merchant 로 잡히는 케이스 존재. 후속 CL 에서 섹션 검출 + 별도 layout 파싱.
+* SMS 환불 (-300) 같은 부호 edge case 도 일부 파서에서 +로 해석 가능.
+  → 정상 거래 99% 는 매칭. dedup 으로 거의 자동 fix.
+
 ## Unreleased — 2026-05-09 (formal PDF import tool)
 
 ### Added
