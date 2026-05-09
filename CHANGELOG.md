@@ -8,6 +8,27 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## Unreleased — 2026-05-09 (delete via official MCP)
+
+### Added
+
+* `src/whooing_mcp/official_mcp.py` — 공식 후잉 MCP (`whooing.com/mcp`) HTTP
+  JSON-RPC 클라이언트. `OfficialMcpClient.list_tools()` / `call_tool()`.
+  서버는 stateless 라 init/initialized handshake 없이 단일 request 로 호출
+  가능 (probe 검증 2026-05-09).
+* 도구 `whooing_delete_entries` (총 19개) — 공식 MCP 의 `entries-delete` 를
+  chained-call. confirm=True 가드 + statement_import_log 자동 동기화. 본
+  wrapper 의 read-only 정책 부분 예외 (직접 REST X, 공식 MCP 위임).
+
+### Why
+2026-05-09 PDF import 작업 중 후잉 REST DELETE 가 우리 호출에 응답 안 함이
+확인됐고, 사용자가 수동 cleanup. 본 CL 은 그 과정을 자동화 — 공식 MCP 의
+entries-delete (검증된 호출 형식) 를 wrapper 가 대신 호출.
+
+### Verified (live)
+* 존재하지 않는 entry_id → official MCP isError 응답 정상 capture.
+* test section 에 entry 임시 입력 → 새 도구로 삭제 → success.
+
 ## Unreleased — 2026-05-09 (PDF import session)
 
 ### Added

@@ -29,6 +29,7 @@ from whooing_mcp.tools.annotations import (
 )
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
+from whooing_mcp.tools.delete import delete_entries
 from whooing_mcp.tools.dedup import find_duplicates
 from whooing_mcp.tools.monthly_close import monthly_close
 from whooing_mcp.tools.pending import (
@@ -499,6 +500,31 @@ def build_mcp() -> FastMCP:
             client, sid = await _ensure_client_and_section(section_id)
             return await find_entries_by_hashtag(
                 client, hashtag=hashtag, section_id=sid, lookback_days=lookback_days
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "후잉 거래를 영구 삭제합니다 (공식 MCP 의 entries-delete 호출 통과). "
+            "재무 데이터 영구 삭제 — 'confirm=True' 필수 가드. entry_ids 는 list "
+            "또는 단일 string. update_import_log=True (기본) 면 statement_import_log "
+            "의 해당 entries 도 status='deleted' 로 동기화."
+        )
+    )
+    async def whooing_delete_entries(
+        entry_ids: str | list[str],
+        section_id: str | None = None,
+        confirm: bool = False,
+        update_import_log: bool = True,
+    ) -> dict:
+        try:
+            _, sid = await _ensure_client_and_section(section_id)
+            return await delete_entries(
+                entry_ids=entry_ids,
+                section_id=sid,
+                confirm=confirm,
+                update_import_log=update_import_log,
             )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
