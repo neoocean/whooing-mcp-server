@@ -1,602 +1,588 @@
-# whooing-mcp-server 설계 문서
+# whooing-mcp-server 설계 문서 (v2)
 
-이 문서는 [whooing.com](https://whooing.com) (이하 **후잉**) 가계부 서비스의 공개
-API를 MCP(Model Context Protocol) 서버로 래핑해 Claude Code / Claude Desktop /
-기타 MCP 호스트에서 자연어로 가계부를 조회·기록할 수 있게 하는 프로젝트의
-설계를 정리한다.
+이 문서는 [whooing.com](https://whooing.com) (이하 **후잉**) 가계부의 **공식
+MCP 서버**(`https://whooing.com/mcp`) 위에서 동작하는 **보완 도구 묶음**의
+설계를 정리한다. Claude Code / Claude Desktop 사용자는 공식 MCP 와 본
+wrapper MCP 를 함께 등록해, 자연어로 가계부를 다루면서 공식이 제공하지
+않는 영역(결제 알림 파싱 / LLM 입력 audit / 카드명세서 CSV 정산)을 추가로
+사용한다.
 
-> 본 문서는 **현재 시점의 스냅샷**이며, 코드와 어긋날 경우 항상 코드가 우선
-> 한다. 큰 변경을 가하면서 본 문서가 더 이상 정확하지 않다고 판단되면, 같은
-> 체인지리스트에서 이 파일을 함께 갱신하라.
-
-> **작성 시점**: 2026-05-09. 구현 코드는 아직 없으며, 본 문서는 **착수 전
-> 타당성 검토 + 설계 합의** 단계에서 작성되었다.
+> 본 문서는 **현재 시점의 스냅샷**이며, 코드와 어긋날 경우 항상 코드가
+> 우선한다. 큰 변경 시 같은 changelist 에서 본 문서를 함께 갱신한다.
 
 ---
 
-## 목차
+## §0. 변경 이력
 
-| 절 | 제목 | 용도 |
-|---|---|---|
-| §1 | 목표 | 프로젝트 범위 한 페이지 요약 |
-| §2 | 비-목표 (의도된 미구현) | "이거 왜 안 함?" 답 |
-| §3 | 기술적 타당성 검토 (TL;DR) | "되긴 됨?" 답 |
-| §4 | 후잉 공개 API 표면 정리 | 엔드포인트 / 인증 / 데이터 모델 |
-| §5 | MCP 서버 아키텍처 | 모듈 / 트랜스포트 / 캐시 |
-| §6 | 도구(tool) 목록 | 노출할 MCP 함수 명세 |
-| §7 | 언어 / 런타임 선택 | Python vs TypeScript |
-| §8 | 시크릿 관리 | `WHOOING_*` 환경변수 / `.env` |
-| §9 | 에러 처리 + rate limit | 재시도 / 백오프 / 사용자 피드백 |
-| §10 | 캐싱 전략 | 섹션 / 계정 / 빈번항목 |
-| §11 | 테스트 전략 | 단위 / 모킹 / live smoke |
-| §12 | 배포 | launchd / Claude Code 등록 |
-| §13 | 보안·안전 가드 | 쓰기 도구 confirm / 재무 데이터 보호 |
-| §14 | 향후 확장(deferred) | 합의됐지만 v1 미포함 |
-| §15 | 참고 자료 + prior art | 출처 / 비교 |
+| 버전 | 날짜 | CL | 요약 |
+|---|---|---|---|
+| v1 | 2026-05-09 | CL 50633 | 후잉 12 read/write API 를 자체 MCP 도구로 구현하는 안. 폐기됨 (§3.1). |
+| **v2** | **2026-05-09** | **본 CL** | **공식 MCP wrapper 모델로 전면 재작성.** 5개 wrapper 도구. AI 연동 토큰 단일 인증. |
+
+v1 → v2 정정 항목:
+- 후잉이 **공식 MCP 서버 운영 중** (`https://whooing.com/mcp`) — v1 의 12
+  도구 자체 구현은 기능 중복으로 정당성 상실.
+- 후잉 인증은 **AI 연동 토큰** (`X-API-Key: __eyJh...`) 또는 **OAuth2 PKCE**
+  지원. v1 의 5필드 X-API-KEY 는 legacy.
+- 공식 rate limit **분당 20 / 일 20,000**. v1 의 분당 60 cap 추측은 느슨했음.
+- 응답에 `rest_of_api` 필드가 매번 포함 → 클라이언트 측 카운터 불필요.
 
 ---
 
 ## §1. 목표
 
-자연어 한 마디로 후잉 가계부를 다음과 같이 다룰 수 있어야 한다.
+공식 후잉 MCP 가 잘 하는 일은 손대지 않는다 (거래 CRUD / 보고서 / 예산 /
+포스트잇 등). 본 서버는 **공식이 안 주는 3가지 워크플로우**만 채운다:
 
-- "어제 스타벅스에서 카드로 6,200원 썼어." → 분개 1건 자동 입력 (현금/카드 →
-  외식)
-- "이번 달 식비 얼마 썼어?" → P&L 카테고리별 합계 조회
-- "5월 1일~7일 거래 내역 보여줘." → 항목 목록 조회
-- "지금 자산/부채 상태?" → 재무상태표 조회
-- "아직 입력 안 한 카드결제 문자 8건 한꺼번에 넣어줘." → 다건 일괄 입력
-
-스코프:
-
-1. **읽기 도구**: 섹션, 계정, 항목 목록, P&L, 재무상태표, 캘린더, 빈번/최근 항목.
-2. **쓰기 도구**: 항목 추가(단건/다건), 수정, 삭제.
-3. **단일 사용자**: 한 번에 한 사용자의 자격증명만 다룸 (멀티테넌시 X).
-4. **stdio 트랜스포트 우선**, HTTP/SSE는 v1 옵션.
+1. **SMS/Push 결제알림 → 후잉 항목 제안**
+   "신한카드 승인 6,200원 스타벅스..." 같은 한 줄을 붙여넣으면 LLM 이 우리
+   `whooing_parse_payment_sms` 도구로 구조화된 항목 dict 를 받아 사용자에게
+   확인받고, 그 후 **공식 MCP 의 add_entry** 를 호출.
+2. **LLM-입력 audit + 중복 탐지**
+   LLM 이 메모에 `[ai]` 마커를 붙여 입력한 거래만 골라보기 + 같은 금액/유사
+   item 의 중복 후보 찾기. 안전망.
+3. **카드명세서 CSV bulk reconcile**
+   카드사가 매월 주는 CSV 를 후잉의 같은 기간 항목과 매칭. 누락/잉여
+   목록을 LLM 에 반환 → 사용자와 상의 후 공식 MCP 로 보충.
 
 품질 기준:
-
-- 평소 동작은 무인(unattended)이며 사용자 확인 없이 도구가 호출되어도 **안전한
-  실패** (예: 계정명 모호 → 후보 반환, 임의 추측 X).
-- API 키가 잘못되었을 때 **명확한 에러 메시지**를 LLM에 반환해야 사용자에게
-  올바른 안내가 전파됨.
-- 입력 도구는 **idempotency 키 또는 중복 검출**을 통해 같은 거래가 두 번
-  들어가지 않도록 가드.
+- **stateless wrapper 우선**. 도구 1회 호출로 자기-완결되는 결과 반환.
+  로컬 상태(예: audit log)는 후잉 자체 데이터로부터 재구성 가능해야 한다.
+- **자동 입력 X**. 우리 도구는 _제안_ 만 한다. 실제 입력은 사용자가 LLM
+  대화로 확인 후 공식 MCP 가 한다.
+- 자격증명 마스크, rate-limit 친화적, KST 명시.
 
 ---
 
-## §2. 비-목표 (의도된 미구현)
+## §2. 비-목표
 
 | 항목 | 안 하는 이유 |
 |---|---|
-| 후잉 계정 생성 / 회원가입 / 비밀번호 변경 | 공개 API에 없음. 사용자가 웹에서 직접. |
-| **OAuth 3rd-party 인증 플로우** | 후잉 API는 사용자 발급 토큰 기반. 여러 사용자 권한 위임 시나리오 X. |
-| **자동 카테고리 추천 ML 모델 자체 학습** | LLM이 자연어 → 계정 매핑을 충분히 함. 별도 학습 불필요. |
-| 가계부 데이터 로컬 DB 미러링 | 후잉이 source of truth. 캐시는 메타데이터만. |
-| 후잉 외 가계부 (뱅크샐러드/토스/Mint) 통합 | 별 프로젝트로. 본 서버는 후잉 전용. |
-| 다중 후잉 사용자 동시 처리 | 단일 사용자 가정. MCP 호스트 인스턴스를 분리하면 됨. |
-| 모바일 푸시 / SMS 결제문자 자동 파싱 | 후잉이 자체 웹훅 제공 (`whooing.com/info/webhook`). 본 서버는 LLM-driven 입력만. |
-| 그래프/차트 렌더링 | MCP는 텍스트/구조화 데이터 반환. 시각화는 호스트 책임. |
+| 후잉 거래 CRUD 도구 (`add_entry`, `entries`, `pl`, `balance`...) | **공식 MCP 가 함**. 우리는 wrapper. |
+| 거래 자동 입력 (사용자 확인 없이) | 재무 데이터 — 항상 human-in-the-loop |
+| 후잉 외 가계부 통합 (뱅크샐러드/토스/Mint) | 별 프로젝트로 |
+| OAuth2 클라이언트 구현 | v1 단일 사용자 → AI 토큰으로 충분. 다중 사용자 시 §14 |
+| 멀티사용자 동시 처리 | MCP 인스턴스 분리로 해결 |
+| SMS 자동 수신/포워딩 (Tasker / iOS Shortcut 등) | 본 서버 범위 외. 사용자가 텍스트만 LLM 에 붙여넣으면 됨 |
+| OCR / Vision 영수증 처리 | Claude 가 native vision. 우리 서버 가치 없음 |
+| 그래프/차트 렌더링 | MCP 는 구조화 데이터만, 시각화는 호스트 책임 |
 
 ---
 
-## §3. 기술적 타당성 검토 (TL;DR)
+## §3. 방향 결정 + 타당성
 
-**결론: 명백히 가능하다.** 다음 세 가지가 동시에 성립한다.
+### §3.1 왜 wrapper 인가 (v1 폐기 사유)
 
-1. **공개 API가 존재하고 안정적**: 후잉은 사이트 푸터에 "API 문서" 링크와
-   `whooing.com/forum/developer/ko/api_reference/user` 개발자 레퍼런스를 운영.
-   2017년 블로그 포스트 (`lazyhansu`)에서 동일한 인증 스킴이 확인되며,
-   2025년에도 같은 엔드포인트가 동작 중.
-2. **MCP SDK 성숙**: `mcp` 파이썬 SDK / `@modelcontextprotocol/sdk` 타입스크립트
-   SDK 모두 1.x 안정 버전. 도구(tool) 정의 → JSON Schema → stdio 트랜스포트
-   까지 표준 패턴이 확립되어 있다.
-3. **선행 구현 존재**: `jmjeong/whooing-mcp` (TypeScript, 16+ 도구, MIT)가
-   실제로 동작하는 reference. 이는 본 프로젝트가 0→1 이 아니라 **품질·언어·
-   운영 통합을 다시 잡는 1→1.x** 수준의 위험도임을 의미.
+v1 작성 시 (CL 50633) 다음 두 사실을 누락:
 
-남은 불확실성 (구현 1주차에 검증할 항목):
+1. `https://whooing.com/mcp` — 후잉이 직접 호스팅하는 공식 MCP 서버.
+2. `https://whooing.com/api/docs` — OAuth2 PKCE + AI 토큰 기반 공식
+   REST API 명세.
 
-- [ ] **rate limit**: 공식 문서에 명시된 분당/일당 한도가 있는지. 없으면 클라
-      이언트 측 보수적 백오프(예: 초당 5건 cap) 적용.
-- [ ] **signature 계산 방식**: 정적 발급값인지 (앱 등록 시 받은 그대로 사용),
-      아니면 `nonce + timestamp + body`로 매번 HMAC인지. 선행 구현은 정적값을
-      그대로 헤더에 박는 듯 보이나 직접 한 번 호출해서 확정.
-- [ ] **응답 인코딩 (한글)**: `item` 필드 한글이 URL 인코딩만 필요한지, 본문
-      JSON에서는 그대로 UTF-8로 가는지.
-- [ ] **시간대**: `entry_date`는 KST 기준 YYYYMMDD. 서버 시간대가 다를 경우의
-      변환 책임을 어디에 둘지 (→ §4.4).
-- [ ] **delete의 멱등성**: 이미 삭제된 entry_id에 대한 두 번째 DELETE 응답이
-      404인지 200인지.
+같은 날 사용자가 이 두 URL 을 제공해 정정. 공식 MCP 가 v1 계획의 12 도구
+영역을 모두 커버하므로 자체 구현은 기능 중복. 우리가 해야 할 일은 **공식이
+안 주는 영역만 채우는 것**으로 좁혀짐.
 
-위 5가지는 **DESIGN을 막는 항목이 아니며**, 구현 첫 PR(=changelist)에서
-실제 호출 1회로 결정 가능. 따라서 본 프로젝트는 진행 가능.
+### §3.2 wrapper 모델은 기술적으로 가능한가
+
+**예.** 두 가지 경로 모두 가능:
+
+- **경로 A (선택):** 우리 wrapper MCP 는 후잉 REST API 를 직접 호출
+  (httpx + AI 토큰). 공식 MCP 와는 같은 토큰을 공유하지만 직접 통신 X.
+- 경로 B (선택 안 함): 우리 wrapper 가 공식 MCP 의 HTTP MCP 엔드포인트를
+  호출. chained MCP. 의존성 늘어남, 디버깅 어려움.
+
+A 가 단순. 사용자는 Claude 에 **공식 MCP + 우리 wrapper MCP** 두 개를
+등록하고 같은 AI 토큰을 두 곳에 공급한다.
+
+### §3.3 남은 미확정
+
+| 항목 | 해소 방법 |
+|---|---|
+| 공식 MCP 가 입력한 entry 가 우리 audit 마커를 자동으로 박는가? | NO 가정. README 로 LLM 에 "우리 audit 도구로 추적되려면 메모에 `[ai]` 접두" 를 안내 |
+| Push 알림 본문 정형 (캐리어/은행 별) | Phase 3 에서 1~2개 issuer 로 시작, 이후 점진 추가 |
+| CSV 포맷 다양성 | Phase 4 에서 1~2개 카드사 어댑터부터 |
 
 ---
 
-## §4. 후잉 공개 API 표면 정리
+## §4. 후잉 공식 MCP + REST API 표면 (요약)
 
-> ⚠️ 본 절의 일부 디테일은 공개 블로그 + 선행 구현 + 사이트 푸터 링크에서
-> 역추적한 것이다. 구현 시 반드시 공식 `apidoc` 응답으로 한 번 더 검증할 것.
-> 변경되면 본 절을 같은 changelist에서 갱신.
+상세는 [`whooing.com/mcp`](https://whooing.com/mcp) /
+[`whooing.com/api/docs`](https://whooing.com/api/docs) 참조. 본 절은
+**우리 wrapper 가 의존하는 부분만**.
 
 ### §4.1 인증
 
-모든 요청은 `X-API-KEY` 헤더에 다음 5개 값을 담는다.
+```
+X-API-Key: __eyJh...
+```
+- 발급: 후잉 → 사용자 > 계정 > 비밀번호 및 보안 > AI 토큰 발급
+- **앞 underscore 2개 포함 전체** 가 토큰
+- scope: `read`, `write`, `messages`, `post_it`, `bbs` (발급 시 선택)
+- 우리 wrapper 는 v1 에 `read` 만 필요 (입력은 공식 MCP 가 함)
 
-| 키 | 출처 | 비고 |
+### §4.2 우리가 호출하는 엔드포인트 (read-only)
+
+| 용도 | URL | 도구 |
 |---|---|---|
-| `app_id` | 후잉 앱 등록 시 발급 | 영구 |
-| `token` | 사용자별 발급 토큰 | 영구 (사용자가 revoke 가능) |
-| `signature` | 앱 등록 시 발급 | 영구 |
-| `nonce` | 클라이언트가 매 요청 생성 | 16바이트 hex 권장 |
-| `timestamp` | Unix epoch (초) | 서버 시각과 ±5분 이내 가정 |
+| 섹션 목록 (default 결정) | `GET /api/sections.json` | bootstrap |
+| 항목 조회 (audit / dedup / reconcile) | `GET /api/entries.json?section_id=...&start_date=...&end_date=...` | 모든 v1 도구 |
 
-**헤더 직렬화** (잠정 — 공식 문서 확인 필요):
+`section_id` 는 환경변수 default + 도구별 override.
+날짜는 `YYYYMMDD`. 한 호출의 date range 는 1년 이내.
 
-```
-X-API-KEY: app_id=ABC; token=XYZ; signature=DEF; nonce=...; timestamp=...
-```
+### §4.3 응답 포맷
 
-선행 구현이 정적 `signature`를 그대로 보내는 것으로 보이므로, 별도 HMAC
-계산은 v1에서 가정하지 않는다. (만약 HMAC이라면 `hmac.new(secret, msg,
-sha256)`로 추가 1줄.)
-
-### §4.2 엔드포인트 (확인된 + 선행 구현 기반 추정)
-
-베이스: `https://whooing.com/api`
-
-| 카테고리 | Method | 경로 | 용도 | 상태 |
-|---|---|---|---|---|
-| 섹션 | GET | `/sections.json_array` | 사용자가 가진 가계부(섹션) 목록 | ✓ 확인 |
-| 계정 | GET | `/accounts.json_array?section_id=…` | 한 섹션의 계정 목록 (자산/부채/자본/수익/비용) | ✓ 확인 |
-| 항목 | GET | `/entries.json?section_id=…&start_date=…&end_date=…` | 거래 항목 조회 (1년 이내) | ✓ 확인 |
-| 항목 | POST | `/entries.json_array` | 거래 항목 입력 | ✓ 확인 |
-| 항목 | PUT/POST | `/entries/{entry_id}.json` | 거래 항목 수정 | 추정 |
-| 항목 | DELETE | `/entries/{entry_id}.json` | 거래 항목 삭제 | 추정 |
-| 리포트 | GET | `/report_summary.json?…` | P&L 요약 | 추정 |
-| 캘린더 | GET | `/calendar.json?…&yyyymm=…` | 일별 수입/지출 | 추정 |
-| 예산 | GET | `/budget.json?…` | 예산 대비 실적 | 추정 |
-| 빈번 | GET | `/frequent_items.json?…` | 자주 쓰는 거래 템플릿 | 추정 |
-
-**1년 제약**: `entries.json`의 date range는 **최대 1년**. 그 이상 조회는
-클라이언트 측에서 분할 + 병합.
-
-### §4.3 데이터 모델 — 복식부기
-
-후잉의 가장 큰 특징은 **복식부기**. 모든 항목은 차변(left) / 대변(right)
-계정과 금액으로 표현된다.
-
-```
+```json
 {
-  "section_id": "s86473",
-  "entry_date": "20260509",
-  "l_account_type": "expenses",   "l_account_id": "e0007",  "l_account": "외식",
-  "r_account_type": "assets",     "r_account_id": "a0002",  "r_account": "신한카드",
-  "money": 6200,
-  "item": "스타벅스 아메리카노",
-  "memo": ""
+  "code": 200,
+  "message": "",
+  "error_parameters": {},
+  "rest_of_api": 4988,
+  "results": { ... }
 }
 ```
 
-| 거래 종류 | 차변 (l_account) | 대변 (r_account) |
-|---|---|---|
-| 카드/현금으로 지출 | 비용 (외식, 교통…) | 자산 (현금) 또는 부채 (카드대금) |
-| 월급 입금 | 자산 (은행) | 수익 (월급) |
-| 자산 간 이체 | 자산 (도착 계좌) | 자산 (출발 계좌) |
-| 카드 대금 결제 | 부채 (카드대금) | 자산 (은행) |
+`rest_of_api` 가 0 에 가까우면 우리 도구는 일찍 abort + 사용자에게 안내.
 
-**MCP 도구 입장**: 사용자는 자연어로 "스벅 6200원 신한카드"라고만 말한다.
-LLM이 → 계정 매핑을 추론 → `whooing_add_entry(item="스타벅스 아메리카노",
-money=6200, l="외식", r="신한카드")` 호출 → 서버가 캐시된 계정명 → ID 변환.
-**계정명 모호 시 후보 목록을 반환하고 입력은 거부**해야 LLM이 사용자에게
-재질문할 수 있다.
+### §4.4 HTTP 코드 처리
 
-### §4.4 시간대
+| 코드 | 우리 처리 |
+|---|---|
+| 200 | 정상 |
+| 204 | 빈 결과 — 도구는 빈 배열 반환 (에러 X) |
+| 400 | 입력 오류 — `ToolError(USER_INPUT)` |
+| 401 | 토큰 무효 — 한글 메시지 "AI 토큰 만료. 후잉에서 재발급" |
+| 402 | 일일 한도 초과 — 메시지 + `rest_of_api=0` 함께 반환 |
+| 405 | revoke — 401 과 동일 처리 |
+| 429 | 분당 한도 — 1s, 2s, 4s, 8s backoff (max 4회) |
+| 5xx | 1s, 3s 재시도 (max 2회) |
 
-후잉은 KST 운영 가정. `entry_date`는 KST 자정 기준 YYYYMMDD. MCP 서버는
-다음 규칙을 따른다.
+### §4.5 KST 정책
 
-1. 사용자가 명시적으로 "2026-05-09"라고 주면 그대로 사용.
-2. "어제", "오늘" 같은 상대 표현은 **MCP 서버 기준의 KST**로 해석. (서버
-   호스트가 다른 시간대여도 `zoneinfo("Asia/Seoul")` 강제.)
-3. LLM이 잘못된 형식(예: "2026/5/9")을 보내면 서버 측에서 정규화하되, 정규화
-   결과를 응답에 포함해 LLM이 사용자에게 confirmable 하도록.
+후잉의 모든 날짜는 KST. 우리 서버는 `zoneinfo("Asia/Seoul")` 강제.
+"어제/오늘/이번달" 같은 상대 표현은 KST 자정 기준.
 
 ---
 
-## §5. MCP 서버 아키텍처
+## §5. 아키텍처
 
 ### §5.1 트랜스포트
 
 | 트랜스포트 | v1 | 비고 |
 |---|---|---|
-| **stdio** | ✓ | Claude Code / Claude Desktop 기본 |
-| **HTTP/SSE** | △ | flag로 활성화. 데몬 모드 운영 시 |
-| WebSocket | ✗ | MCP가 SSE로 충분 |
+| **stdio** | ✓ | Claude Code / Claude Desktop |
+| HTTP/SSE | ✗ | v2 wrapper 는 단일 사용자. 데몬화 가치 낮음 |
 
 ### §5.2 모듈 분할
 
 ```
 whooing-mcp-server/
 ├── DESIGN.md                ← 본 문서
-├── README.md                ← 사용자 quickstart
-├── pyproject.toml           ← Python 패키지 메타
+├── README.md                ← 사용자 quickstart (공식 MCP 등록 + 우리 등록)
+├── pyproject.toml
 ├── .env.example
 ├── src/
 │   └── whooing_mcp/
 │       ├── __init__.py
-│       ├── __main__.py      ← `python -m whooing_mcp` 진입
-│       ├── server.py        ← MCP server 인스턴스 + tool 등록
-│       ├── client.py        ← 후잉 HTTP 클라이언트 (httpx)
-│       ├── auth.py          ← X-API-KEY 헤더 빌드 + nonce/timestamp
-│       ├── cache.py         ← 섹션/계정/빈번 인메모리 + TTL 디스크 캐시
-│       ├── models.py        ← Pydantic: Section, Account, Entry, …
+│       ├── __main__.py
+│       ├── server.py        ← MCP server + 5 도구 등록
+│       ├── client.py        ← 후잉 REST 호출 (httpx, read-only)
+│       ├── auth.py          ← AI 토큰 헤더 빌더 + 마스크
+│       ├── models.py        ← Pydantic Section / Entry / SmsParseResult / ReconcileResult
+│       ├── dates.py         ← KST 정규화
 │       ├── tools/
-│       │   ├── read.py      ← whooing_pl, whooing_entries, …
-│       │   └── write.py     ← whooing_add_entry, …
-│       ├── resolver.py      ← 계정명 → ID 매칭 (퍼지 + 모호성 처리)
-│       ├── dates.py         ← KST 정규화, "어제/오늘" 파싱
-│       └── errors.py        ← 후잉 에러 → MCP 에러 매핑
+│       │   ├── audit.py     ← whooing_audit_recent_ai_entries
+│       │   ├── dedup.py     ← whooing_find_duplicates
+│       │   ├── sms.py       ← whooing_parse_payment_sms
+│       │   └── reconcile.py ← whooing_reconcile_csv, whooing_csv_format_detect
+│       ├── parsers/
+│       │   └── sms/         ← issuer 별 정규식/패턴
+│       │       ├── shinhan_card.py
+│       │       └── kookmin_card.py
+│       ├── csv_adapters/    ← issuer 별 CSV 컬럼 매핑
+│       │   ├── shinhan_card.py
+│       │   └── kookmin_card.py
+│       └── errors.py
 ├── tests/
+│   ├── fixtures/
+│   │   ├── entries_sample.json
+│   │   ├── sms/             ← 익명화된 실 SMS 텍스트
+│   │   └── csv/             ← 익명화된 실 CSV 행
 │   ├── test_auth.py
-│   ├── test_resolver.py
 │   ├── test_dates.py
-│   ├── test_client_mock.py  ← respx 기반 HTTP 모킹
-│   └── test_tools_e2e.py    ← live (env가 있으면 실행, 없으면 skip)
+│   ├── test_sms_parsers.py
+│   ├── test_dedup.py
+│   ├── test_reconcile.py
+│   └── test_tools_e2e.py    ← live (env 있으면)
 └── examples/
-    └── claude_desktop_config.json
+    └── claude_desktop_config.json   ← 공식 + 우리 wrapper 둘 다
 ```
 
-### §5.3 의존성 (잠정)
+### §5.3 의존성
 
 | 패키지 | 용도 |
 |---|---|
-| `mcp >= 1.0` | MCP 서버 SDK |
-| `httpx` | 후잉 API HTTP 호출 (sync + async) |
-| `pydantic >= 2` | 모델 정의, 도구 입력 스키마 자동 생성 |
-| `python-dotenv` | `.env` 로딩 |
-| `rapidfuzz` | 계정명 퍼지 매칭 |
-| `tzdata` | Windows 환경 KST 타임존 (다른 OS는 system tzdata) |
+| `mcp >= 1.0` | MCP SDK |
+| `httpx` | 후잉 API |
+| `pydantic >= 2` | 모델 + 도구 입력 스키마 |
+| `python-dotenv` | `.env` |
+| `rapidfuzz` | item 유사도 (dedup, reconcile) |
+| `tzdata` | Windows KST |
 
-테스트:
-
-| 패키지 | 용도 |
-|---|---|
-| `pytest` | 러너 |
-| `respx` | httpx 모킹 |
-| `pytest-asyncio` | async 테스트 |
-
-### §5.4 라이프사이클
-
-```
-[stdio 모드]
-  Claude Code ──spawn──▶ python -m whooing_mcp
-                              │
-                              ▼
-                  ┌───────────────────────┐
-                  │ server.start()        │
-                  │  ├─ 환경변수 로드      │
-                  │  ├─ client = WhooingClient(...)
-                  │  ├─ cache.bootstrap()  ← sections + accounts 1회 prefetch
-                  │  └─ stdio_loop()       ← MCP framing
-                  └───────────────────────┘
-                              │
-                       (도구 호출마다)
-                              │
-                              ▼
-                       handle_tool(name, args)
-```
-
-**bootstrap 실패 정책**: 자격증명이 잘못된 경우 stdout에 MCP 에러를 보내고
-정상 종료(exit 1). Claude Code는 다음 도구 호출 시 재시작.
+테스트: `pytest`, `respx`, `pytest-asyncio`.
 
 ---
 
-## §6. 도구(tool) 목록
+## §6. 도구 명세 (v1: 5개)
 
-선행 구현(`jmjeong/whooing-mcp`)의 16개 도구를 baseline으로 하되, 본 서버는
-**v1을 12개로 축소** 후 §14에서 점진 확장한다.
+### §6.1 `whooing_parse_payment_sms`
 
-### §6.1 v1 도구 (12개)
+**목적:** SMS/Push 알림 본문 1줄을 받아 후잉 항목 후보로 변환. **API
+호출 없음** (순수 파싱).
 
-#### 읽기 (8)
-
-| 도구 | 입력 | 출력 | 비고 |
-|---|---|---|---|
-| `whooing_sections` | — | `[{id, name, default}]` | bootstrap 캐시에서 즉답 |
-| `whooing_accounts` | `section_id?` | 계정 목록 (type별 그룹) | 캐시 |
-| `whooing_entries` | `section_id?, start_date, end_date, account?, q?, limit?` | 항목 배열 | 1년 초과 시 분할 호출 |
-| `whooing_entry_detail` | `entry_id` | 단일 항목 전체 필드 | |
-| `whooing_pl` | `section_id?, start_date, end_date, group_by=category` | 카테고리별 수입/지출 합계 | |
-| `whooing_balance` | `section_id?, as_of?` | 자산/부채/자본 스냅샷 | |
-| `whooing_calendar` | `section_id?, yyyymm` | 일별 수입/지출 합계 | |
-| `whooing_frequent_items` | `section_id?, limit?` | 자주 쓰는 거래 템플릿 | |
-
-#### 쓰기 (4)
-
-| 도구 | 입력 | 출력 | 가드 |
-|---|---|---|---|
-| `whooing_add_entry` | `section_id?, entry_date, l_account, r_account, money, item, memo?` | `{entry_id}` | 계정 모호 시 후보 반환 + 입력 거부 |
-| `whooing_bulk_add_entries` | `entries: [...]` | `[{entry_id} \| {error}]` | 부분 성공 허용. 실패한 건은 LLM이 사용자에게 보고 |
-| `whooing_update_entry` | `entry_id, …변경 필드…` | `{ok}` | 원본 fetch → diff 표시 |
-| `whooing_delete_entry` | `entry_id, confirm=true` | `{ok}` | `confirm` 누락 시 entry detail만 반환 |
-
-### §6.2 도구 명세 컨벤션
-
-- **모든 입력은 Pydantic 모델**, JSON Schema 자동 생성 → MCP가 LLM에 전달.
-- **출력은 항상 dict**, 절대 raw 문자열 X. (LLM이 구조 파싱 가능하도록.)
-- **에러는 raise**, MCP가 자동으로 isError=true로 변환.
-- **`section_id` 옵셔널**: 환경변수 `WHOOING_SECTION_ID`가 default. 사용자가
-  여러 섹션을 가진 경우만 명시적으로 받음.
-
-### §6.3 계정명 → ID 해석 (resolver.py)
-
-쓰기 도구에서 `l_account="외식"` 같은 한글명이 들어오면:
-
-1. 캐시된 계정 목록에서 **정확 일치** 탐색.
-2. 없으면 `rapidfuzz.process.extract`로 ratio ≥ 90 후보 1개 탐색.
-3. 없으면 ratio ≥ 70 후보 **목록**을 반환하면서 에러 raise (`AccountAmbiguous`).
-
-이 가드가 있어야 LLM이 잘못된 계정에 무단 입력하지 않음.
-
----
-
-## §7. 언어 / 런타임 선택
-
-### 결정: **Python 3.11+**
-
-| 기준 | Python | TypeScript |
+| 입력 | 타입 | 설명 |
 |---|---|---|
-| 워크스페이스 일관성 (`scripts/` 대부분 Python) | **+** | − |
-| MCP SDK 성숙도 | + (1.x) | + (1.x) |
-| 한글 처리 (URL 인코딩, 인코딩 디버깅) | + | + |
-| Pydantic v2로 자동 JSON Schema | **+** | (zod로 가능) |
-| launchd plist 통합 패턴 (워크스페이스에 이미 존재) | **+** | (가능하나 새 패턴) |
-| 선행 구현 재사용 | − (TS) | + |
+| `text` | str | SMS/Push 본문 |
+| `issuer_hint` | str? | `shinhan_card` / `kookmin_card` / `toss` / `kakaopay` / `auto` |
 
-워크스페이스에 이미 `docker-monitor`, `arq-backup-tui`, `p4v-tui`, `rx`,
-`upload_to_confluence` 등 Python 도구가 다수이고 launchd 운영 패턴도 정착되어
-있으므로, **Python으로 통일하는 운영 단순성**이 선행 구현 재사용 이득보다 크다.
+**출력:**
+```python
+{
+  "proposed_entry": {
+    "entry_date": "20260509",      # KST
+    "money": 6200,
+    "merchant": "스타벅스 강남점",
+    "direction": "expense",         # expense | income | transfer
+    "suggested_l_account": "외식",  # 카테고리 추정 (모르면 None)
+    "suggested_r_account": "신한카드"
+  },
+  "confidence": 0.85,
+  "notes": ["할부 X", "통화: KRW"],
+  "parser_used": "shinhan_card.v1"
+}
+```
 
-> 단, 선행 구현의 **API 호출 패턴, 에러 코드 매핑, 도구 명명 규칙**은 그대로
-> 차용한다. 이는 향후 사용자가 두 구현 사이를 옮겨다닐 때 마찰을 줄인다.
+LLM 은 이 dict 를 사용자에게 보여주고 확인을 받은 후 **공식 MCP 의
+add_entry 도구**로 입력. 우리 도구는 입력하지 않는다.
+
+`suggested_l_account` 가 None 이거나 confidence 가 낮으면 LLM 에 모호함을
+명시 → LLM 이 사용자에게 재질문.
+
+### §6.2 `whooing_find_duplicates`
+
+**목적:** 같은 금액 + 유사 item + ±tolerance_days 안 거래쌍을 후보로 반환.
+
+| 입력 | 타입 | 기본 |
+|---|---|---|
+| `start_date` | YYYYMMDD | — |
+| `end_date` | YYYYMMDD | — |
+| `section_id` | str? | env default |
+| `tolerance_days` | int | 1 |
+| `min_similarity` | float | 0.85 |
+
+**출력:**
+```python
+{
+  "pairs": [
+    {
+      "entry_a": {...},
+      "entry_b": {...},
+      "why": ["same money 6200", "item similarity 0.93", "1 day apart"]
+    }
+  ],
+  "total_checked": 142
+}
+```
+
+date range 가 1년 초과 시 분할 호출 + 병합.
+
+### §6.3 `whooing_audit_recent_ai_entries`
+
+**목적:** LLM 이 입력한 거래만 골라보기 (메모 접두로 식별).
+
+| 입력 | 타입 | 기본 |
+|---|---|---|
+| `days` | int | 7 |
+| `marker` | str | `[ai]` |
+| `section_id` | str? | env default |
+
+**출력:** `{"entries": [...], "total": N, "marker_used": "[ai]"}`
+
+**규칙:** README + 도구 description 으로 LLM 에 안내 — "사용자 위임으로
+add_entry 호출 시 memo 첫 단어로 `[ai]` 를 붙여라". 공식 MCP 의 도구에는
+우리가 hook 을 못 건다 → 컨벤션으로 해결.
+
+### §6.4 `whooing_reconcile_csv`
+
+**목적:** 카드명세서 CSV 와 후잉 entries 의 차이.
+
+| 입력 | 타입 | 기본 |
+|---|---|---|
+| `csv_path` | str (절대) | — |
+| `issuer` | str | `auto` |
+| `start_date` | YYYYMMDD? | csv min |
+| `end_date` | YYYYMMDD? | csv max |
+| `section_id` | str? | env default |
+| `tolerance_days` | int | 2 |
+| `tolerance_amount` | int | 0 |
+
+**출력:**
+```python
+{
+  "summary": {
+    "csv_total": 47,
+    "whooing_total": 51,
+    "matched_count": 44,
+    "missing_in_whooing_count": 3,
+    "extra_in_whooing_count": 7
+  },
+  "missing_in_whooing": [...],   # CSV 에 있는데 후잉에 없는 거래
+  "extra_in_whooing": [...],     # 후잉에 있는데 CSV 에 없는 거래
+  "matched": [...]               # 매칭된 쌍 (요약 통계용)
+}
+```
+
+매칭 알고리즘: same date ±tolerance + same amount ±tolerance, 그 다음
+item 유사도 sort. greedy 1-1 매칭.
+
+### §6.5 `whooing_csv_format_detect`
+
+**목적:** `whooing_reconcile_csv` 가 `issuer` 자동 감지에 실패할 때 사용자
+디버깅용.
+
+| 입력 | 타입 |
+|---|---|
+| `csv_path` | str (절대) |
+
+**출력:**
+```python
+{
+  "detected_issuer": "shinhan_card",
+  "confidence": 0.92,
+  "header_sample": ["거래일자", "가맹점명", "이용금액", ...],
+  "column_mapping_proposed": {
+    "date_col": "거래일자",
+    "amount_col": "이용금액",
+    "merchant_col": "가맹점명"
+  },
+  "supported_issuers": ["shinhan_card", "kookmin_card"]
+}
+```
+
+### §6.6 도구 컨벤션
+
+- 모든 입력 Pydantic, JSON Schema 자동 생성.
+- 모든 출력 dict (raw 문자열 X).
+- 에러 raise → MCP 가 isError 로 변환.
+- `section_id` 옵셔널, env default.
+
+---
+
+## §7. 언어 / 런타임
+
+**Python 3.11+** (v1 결정 유지). 워크스페이스 일관성, Pydantic v2 의 자동
+JSON Schema, launchd 통합 패턴 정착.
 
 ---
 
 ## §8. 시크릿 관리
 
-### §8.1 환경변수
+### §8.1 환경변수 (단순화됨 — v1 의 4개 → v2 의 1+α)
 
 | 키 | 필수 | 설명 |
 |---|---|---|
-| `WHOOING_APP_ID` | ✓ | 앱 등록 시 발급 |
-| `WHOOING_TOKEN` | ✓ | 사용자 토큰 |
-| `WHOOING_SIGNATURE` | ✓ | 앱 등록 시 발급 |
-| `WHOOING_SECTION_ID` | △ | 섹션 1개만 쓰는 사용자의 default |
-| `WHOOING_BASE_URL` | △ | 기본 `https://whooing.com/api`. staging 가정 X. |
+| `WHOOING_AI_TOKEN` | ✓ | `__eyJh...` 전체 |
+| `WHOOING_SECTION_ID` | △ | 섹션 1개만 쓸 때 default. 없으면 첫 섹션 자동 |
+| `WHOOING_BASE_URL` | △ | 기본 `https://whooing.com/api` |
 | `WHOOING_HTTP_TIMEOUT` | △ | 기본 10초 |
-| `WHOOING_LOG_LEVEL` | △ | `INFO` 기본 |
+| `WHOOING_LOG_LEVEL` | △ | `INFO` |
 
 ### §8.2 로딩 우선순위
 
-1. 프로세스 환경변수 (Claude Code config의 `env`)
+1. 프로세스 환경변수 (Claude Desktop config 의 `env`)
 2. 워킹 디렉터리의 `.env`
 3. `~/.config/whooing-mcp/.env`
-4. **로깅 시 절대 출력 금지** (값을 mask. `auth.py`의 `__repr__`도 마스크.)
+4. **로깅 시 절대 출력 금지**, `auth.py.__repr__` 마스크
 
-### §8.3 자격증명 회수 시나리오
+### §8.3 토큰 회수
 
-사용자가 후잉 웹에서 토큰을 revoke 한 경우 → 401/403. 서버는:
-
-1. 캐시 무효화 (잘못된 자격으로 캐시된 메타가 stale일 수 있음)
-2. MCP 에러 메시지: "WHOOING_TOKEN이 거부되었습니다. 후잉 → 앱 설정에서 토큰을
-   재발급하고 환경변수를 갱신하세요." (한글로 명확히)
-3. 자동 재시도 X (영구적 에러로 취급).
+revoke 시 401/405 → 캐시 무효화 + 한글 메시지 "AI 토큰이 거부되었습니다.
+후잉 → 사용자 > 계정 > 비밀번호 및 보안 에서 재발급". 자동 재시도 X.
 
 ---
 
-## §9. 에러 처리 + rate limit
+## §9. 에러 + rate limit
 
-### §9.1 후잉 → MCP 에러 매핑
+§4.4 의 매핑을 따른다. 추가:
 
-| HTTP | 후잉 의미(추정) | MCP 동작 |
+- **분당 20회 client-side cap** (공식 한도 그대로). 초과 시 큐잉.
+- **응답의 `rest_of_api` 값을 매번 로깅** (DEBUG). 0 에 가까우면 도구가
+  사용자에게 경고와 함께 일찍 abort.
+- bulk 호출 없음 (entries 만 GET, 도구 1회당 GET 몇 회 수준).
+
+---
+
+## §10. 캐싱
+
+대부분 도구가 짧은 1회 호출이라 캐시 가치 낮음.
+
+| 데이터 | 캐시 | 비고 |
 |---|---|---|
-| 200 | OK | 정상 반환 |
-| 400 | 파라미터 오류 | `ToolError(USER_INPUT, …)` 즉시 반환 |
-| 401/403 | 자격 거부 | `ToolError(AUTH, …)` + 캐시 무효화. 재시도 X |
-| 404 | 리소스 없음 | 도구별 처리 (delete는 멱등 OK, 나머지는 에러) |
-| 409 | 중복 entry | `whooing_add_entry`만 발생. 사용자에게 "유사한 항목이 이미 있음" + 후보 반환 |
-| 429 | rate limit | exponential backoff (1s, 2s, 4s, 8s; max 4회). 그래도 실패 시 `ToolError(RATE_LIMIT, …)` |
-| 5xx | 서버 오류 | 재시도 (1s, 3s; max 2회). 실패 시 `ToolError(UPSTREAM, …)` |
-
-### §9.2 클라이언트 측 자체 throttle
-
-공식 한도가 불명확하므로 보수적으로:
-
-- **분당 60회 cap** (per process). 초과 시 client 측 큐잉.
-- bulk add도 내부적으로는 1건씩 직렬화 (서버 측 트랜잭션 보장 없음).
-
-### §9.3 idempotency 가드 (쓰기)
-
-`whooing_add_entry`는 입력 시점에 다음 검사:
-
-1. 같은 `(entry_date, money, item, l_account, r_account)` 조합이 이미 같은
-   날짜 ±1일 안에 있으면 **자동 입력 거부**, 후보 entry_id를 반환하면서
-   `Possible duplicate` 경고. LLM이 사용자에게 확인 받은 후 `force=true`로
-   재호출.
+| sections | bootstrap 1회 메모리 | 거의 안 변함 |
+| entries (도구 호출별) | 캐시 X | always fresh |
+| dedup 결과 | 캐시 X | 입력 파라미터마다 다름 |
 
 ---
 
-## §10. 캐싱 전략
+## §11. 테스트
 
-| 데이터 | 위치 | TTL | 갱신 트리거 |
-|---|---|---|---|
-| sections | 메모리 | 세션 전체 | bootstrap |
-| accounts | 메모리 | 1시간 | `whooing_accounts` 호출 / 만료 / `cache.invalidate()` |
-| frequent_items | 메모리 | 30분 | 호출 시 lazy |
-| 어제까지의 entries | 메모리 LRU(50) | 30분 | 호출 |
-| 오늘의 entries | 캐시 X | — | 매번 fresh (입력 직후 반영 필요) |
+| 레이어 | 도구 |
+|---|---|
+| 단위 | pytest (`auth`, `dates`, `sms parsers`, `csv adapters`, `dedup algo`) |
+| HTTP 모킹 | respx (`client.py`) |
+| 도구 단위 | pytest + 모킹 클라이언트 |
+| live smoke | `WHOOING_LIVE_TEST=1` 시 실제 후잉 호출. 테스트용 섹션에서만 |
 
-디스크 캐시는 v1에 없음. 프로세스 재시작 시 bootstrap 1회로 충분 (sections +
-accounts ≈ 2 요청, < 1초).
-
----
-
-## §11. 테스트 전략
-
-### §11.1 레이어
-
-| 레이어 | 도구 | 커버 대상 |
-|---|---|---|
-| 단위 | pytest | `auth.py`, `dates.py`, `resolver.py`, `cache.py` |
-| HTTP 모킹 | respx | `client.py` (요청 빌드 + 응답 파싱) |
-| 도구 단위 | pytest + 모킹 클라이언트 | `tools/*.py` 입출력 |
-| live smoke | pytest + 환경변수 | 실 후잉 API. CI 기본 skip, `WHOOING_LIVE_TEST=1`이면 실행 |
-
-### §11.2 live smoke 정책
-
-- 별도 **테스트용 섹션**을 후잉에 만들어 사용 (실 가계부 오염 X).
-- smoke 흐름: bootstrap → add_entry(테스트 거래) → entries 조회 → delete_entry
-  → 정리 확인.
-- 재무 데이터의 민감도 때문에 **CI runner에 자격증명을 두지 않는다**. 로컬
-  개발자 머신에서만 수동 실행.
-
-### §11.3 회귀 픽스처
-
-후잉 응답 샘플(JSON)을 `tests/fixtures/`에 캡처해두고 모킹에 사용. 회귀
-방지 + 사용자가 후잉 응답 형식 변경을 의심할 때 진단 자료.
+SMS / CSV 픽스처는 **익명화** (실 가맹점명/금액 변환) 후 commit.
 
 ---
 
 ## §12. 배포
 
-### §12.1 로컬 / Claude Code 등록
+### §12.1 Claude Desktop / Code 설정 — 공식 + 우리 wrapper 둘 다
 
-`examples/claude_desktop_config.json` 발췌:
-
+`examples/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "whooing": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://whooing.com/mcp",
+               "--header", "X-API-Key: __eyJh..."]
+    },
+    "whooing-extras": {
       "command": "python",
       "args": ["-m", "whooing_mcp"],
       "env": {
-        "WHOOING_APP_ID": "…",
-        "WHOOING_TOKEN": "…",
-        "WHOOING_SIGNATURE": "…",
-        "WHOOING_SECTION_ID": "…"
+        "WHOOING_AI_TOKEN": "__eyJh...",
+        "WHOOING_SECTION_ID": "..."
       }
     }
   }
 }
 ```
 
-### §12.2 launchd (macOS, HTTP 모드)
+Claude Code:
+```bash
+# 공식
+claude mcp add --transport http whooing https://whooing.com/mcp \
+  --header "X-API-Key: __eyJh..." --scope user
 
-데몬으로 띄워두고 여러 호스트에서 공유하고 싶을 때:
-
+# 우리 wrapper
+claude mcp add whooing-extras python -m whooing_mcp --scope user \
+  --env WHOOING_AI_TOKEN=__eyJh... \
+  --env WHOOING_SECTION_ID=...
 ```
-~/Library/LaunchAgents/com.whooing.mcp.plist
-  → python -m whooing_mcp --http --port 8182
-```
 
-워크스페이스에 이미 launchd 패턴이 정착되어 있으므로 동일 컨벤션을 따른다.
-HTTP 모드는 v1.1 이후로 미룬다 (§14).
+### §12.2 패키징
 
-### §12.3 패키징
-
-- `pyproject.toml` (PEP 621) + `hatchling` 또는 `setuptools` 빌드 백엔드.
-- `pip install -e .` 로 개발 모드.
-- PyPI 배포는 v1 이후 결정.
+`pyproject.toml` (PEP 621), `pip install -e .`. PyPI 는 v1 이후.
 
 ---
 
 ## §13. 보안·안전 가드
 
-재무 데이터를 다루므로 다른 도구보다 가드가 빡빡하다.
-
 | 가드 | 적용 |
 |---|---|
-| 자격증명 절대 로깅 금지 | `auth.py.__repr__` 마스크, 디버그 로그도 헤더 마스크 |
-| 쓰기 도구 idempotency | §9.3 |
-| delete 명시적 confirm | §6.1 (delete는 `confirm=true` 없으면 detail만 반환) |
-| 계정명 모호 시 입력 거부 | §6.3 |
-| upstream 5xx 재시도 cap | §9.1 (무한 재시도 X) |
-| bulk 부분 성공 명시 | 응답에 성공/실패 배열 분리 |
-| 응답 페이로드 sample을 git에 커밋할 때 마스크 | 픽스처 작성 시 실 계좌번호 / 잔액 → 더미 |
-
-### §13.1 멀티 클라이언트 가드
-
-같은 자격증명으로 두 MCP 인스턴스가 동시에 쓰기 호출하면 race가 가능. v1에는
-경고만:
-
-- bootstrap 시 자체 PID + 시작 시각을 stderr에 출력.
-- 운영자가 두 인스턴스를 띄운 것을 알아챌 수 있도록.
-
-분산 락은 v2 이후.
+| 토큰 절대 로깅 금지 | `auth.py.__repr__` 마스크, 디버그 로그 헤더 마스크 |
+| 우리 도구는 입력 X | 실제 add/update/delete 는 공식 MCP — race 책임 분리 |
+| dedup/reconcile 결과는 _제안_ 만 | LLM 이 사용자 확인 받음 |
+| upstream 5xx 재시도 cap | §4.4 |
+| 픽스처 익명화 | §11 |
+| `[ai]` 마커 컨벤션 README 강조 | §6.3 |
 
 ---
 
-## §14. 향후 확장 (deferred)
+## §14. 향후 확장
 
-| 항목 | 우선순위 | 비고 |
-|---|---|---|
-| HTTP/SSE 트랜스포트 | P1 | 데몬 모드. launchd plist 포함 |
-| `whooing_search_entries` (서버사이드 풀텍스트) | P1 | 후잉 API 지원 확인 필요 |
-| `whooing_budget` (예산 대비 실적) | P2 | |
-| `whooing_monthly_summary` | P2 | 캘린더 + P&L 합성 |
-| `whooing_account_activity` (계정별 거래 내역) | P2 | |
-| `whooing_duplicate_candidates` (잠재 중복 탐지) | P2 | idempotency 가드의 explicit 도구화 |
-| 로컬 쓰기 작업 일지 (audit log) | P2 | "지난 주에 LLM이 입력한 거래 모두 보여줘" |
-| 후잉 웹훅 수신 → MCP 호스트 푸시 (notification) | P3 | MCP 서버가 outbound notification 가능 |
-| 다중 사용자 (자격증명 vault 통합) | P3 | |
-| 분산 락 / 동시성 가드 | P3 | |
-| TUI 동반 도구 | P3 | 워크스페이스의 다른 `*-tui` 패턴과 일관성 |
+| 항목 | 우선순위 |
+|---|---|
+| OAuth2 PKCE 클라이언트 (멀티사용자 / 공개 배포) | P1 |
+| SMS issuer 추가 (현대카드 / 삼성카드 / 토스 / 카카오뱅크 / 우리은행 ...) | P1 (수요 따라) |
+| CSV adapter 추가 (issuer 별) | P1 |
+| 영수증 photo → entry (Vision LLM 보조 도구) | P2 |
+| 자동 카테고리 학습 (사용자의 과거 입력 기반) | P2 |
+| `whooing_monthly_close` (월말 정산 자동 점검) | P2 |
+| HTTP/SSE 트랜스포트 + launchd 데몬화 | P2 |
+| Telegram/email 예산 알람 데몬 | P3 |
+| 후잉 webhook 수신 → MCP outbound notification | P3 |
 
 ---
 
-## §15. 참고 자료 + prior art
+## §15. 참고 자료
 
 ### 공식
+- [whooing.com/mcp](https://whooing.com/mcp) — 후잉 공식 MCP 가이드
+- [whooing.com/api/docs](https://whooing.com/api/docs) — REST API 명세
+  (OAuth2 PKCE / AI 토큰 / 엔드포인트 / 에러 코드 / rate limit)
+- [whooing.com](https://whooing.com) — 서비스 홈
 
-- [whooing.com](https://whooing.com/) — 서비스 홈. 푸터에 "API 문서" 링크.
-- [whooing.com/forum/developer/ko/api_reference/user](https://whooing.com/forum/developer/ko/api_reference/user)
-  — 공개 개발자 API 레퍼런스 (구현 시 본문을 직접 확인).
-- [whooing.com/info/webhook](https://whooing.com/info/webhook) — 웹훅 (본
-  프로젝트 범위 외).
-- [whooing.com/help/dic/accounts/ko](https://whooing.com/help/dic/accounts/ko)
-  — 계정 용어 사전 (resolver.py 동의어 사전 시드용).
-
-### 비공식 / 선행 구현
-
-- [jmjeong/whooing-mcp](https://github.com/jmjeong/whooing-mcp) — TypeScript
-  MCP 서버. 16+ 도구, MIT. **본 프로젝트의 1차 참조**.
-- [glama.ai/mcp/servers/jmjeong/whooing-mcp](https://glama.ai/mcp/servers/jmjeong/whooing-mcp)
-  — 위 구현의 메타데이터 페이지.
-- [Lazy Hansu — Python으로 whooing 텔레그램 봇 만들기 #2 (2017)](https://lazyhansu.wordpress.com/2017/10/24/python-%ec%9c%bc%eb%a1%9c-whooing-%ed%85%94%eb%a0%88%ea%b7%b8%eb%9e%a8-%eb%b4%87-%eb%a7%8c%eb%93%a4%ea%b8%b0-2/)
-  — `X-API-KEY` 헤더 5요소 스킴의 1차 출처.
-- [XeO3/i-bought-it](https://github.com/XeO3/i-bought-it) — TypeScript /
-  Vue 기반 간이 입력기. UX 참조.
+### 비공식 / prior art
+- [jmjeong/whooing-mcp](https://github.com/jmjeong/whooing-mcp) — 자체 구현
+  TypeScript MCP. v2 가 wrapper 모델로 전환하면서 직접 참조 의존성은 사라짐.
+  legacy 인증 패턴 디버깅 시 참조.
+- v1 DESIGN (P4 CL 50633) — 본 프로젝트의 폐기된 자체 구현 안. 의사결정
+  이력 보존용.
 
 ### MCP
-
-- [modelcontextprotocol.io](https://modelcontextprotocol.io/) — 사양.
+- [modelcontextprotocol.io](https://modelcontextprotocol.io/) — 사양
 - [github.com/modelcontextprotocol/python-sdk](https://github.com/modelcontextprotocol/python-sdk)
-  — Python SDK.
+- `mcp-remote` — 공식 MCP 의 HTTP 엔드포인트를 stdio 로 brigding 하는 보조 NPX
 
 ---
 
-## 부록 A. 첫 changelist 체크리스트
+## 부록 A. 첫 구현 changelist 체크리스트 (v2)
 
-DESIGN 합의 후 첫 구현 changelist에서 처리할 항목 (순서대로):
+DESIGN 합의 후 첫 구현 CL 들 (각 1 CL 권장):
 
-- [ ] `pyproject.toml` + `src/whooing_mcp/__init__.py` 골격
-- [ ] `auth.py` + `client.py` 최소 구현 + `whooing_sections`, `whooing_accounts`
-      두 도구만 노출
-- [ ] **실 API 1회 호출**로 §3의 5가지 미확정 항목 결론 → 본 문서 갱신
-- [ ] `tests/test_client_mock.py` 픽스처 캡처
-- [ ] `examples/claude_desktop_config.json`
-- [ ] `README.md` 사용자 quickstart
+### CL #1 — 골격 + audit 도구 (가장 단순)
+- [ ] `pyproject.toml` + `src/whooing_mcp/__init__.py`, `__main__.py`
+- [ ] `auth.py` (AI 토큰 헤더 + 마스크)
+- [ ] `client.py` (httpx, GET sections / GET entries 만)
+- [ ] `models.py` (Section, Entry, ToolError)
+- [ ] `dates.py` (KST 정규화)
+- [ ] `tools/audit.py` — `whooing_audit_recent_ai_entries`
+- [ ] `server.py` — 위 1개 도구 등록
+- [ ] `examples/claude_desktop_config.json` (공식 + 우리 둘 다)
+- [ ] `README.md` quickstart
+- [ ] `tests/fixtures/entries_sample.json` 캡처
+- [ ] **live smoke 1회**: 테스트 섹션에서 도구 호출 → 응답 확인 → CL
+       description 에 결과 기록
 
-이 첫 PR이 머지되면 §6의 나머지 도구를 PR 단위로 추가한다.
+### CL #2 — dedup
+- [ ] `tools/dedup.py` — `whooing_find_duplicates`
+- [ ] `rapidfuzz` 통합
+- [ ] 단위 테스트 (작은 entries fixture 로 알고리즘 검증)
+
+### CL #3 — SMS parser (1~2 issuer 부터)
+- [ ] `parsers/sms/shinhan_card.py`, `kookmin_card.py`
+- [ ] `tools/sms.py` — `whooing_parse_payment_sms`
+- [ ] `tests/fixtures/sms/` 익명화 샘플
+- [ ] auto-detect 로직
+
+### CL #4 — CSV reconcile (1~2 카드사 부터)
+- [ ] `csv_adapters/shinhan_card.py`, `kookmin_card.py`
+- [ ] `tools/reconcile.py` — `whooing_reconcile_csv`,
+      `whooing_csv_format_detect`
+- [ ] `tests/fixtures/csv/` 익명화 샘플
+- [ ] reconcile greedy 매칭 알고리즘 + 단위 테스트
+
+### CL #5 — 견고성 / 배포
+- [ ] `errors.py` 매핑 완전 (§4.4 표 그대로)
+- [ ] rate limit (분당 20 cap + `rest_of_api` 활용)
+- [ ] 토큰 마스크 회귀 테스트
+- [ ] `README.md` 보강 (트러블슈팅, `[ai]` 마커 컨벤션 강조)
+- [ ] `CHANGELOG.md` 시작 + v1.0 태그
+
+각 CL 마다 P4 + GitHub 동시 미러 (정책 메모 참조).
