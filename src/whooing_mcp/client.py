@@ -108,15 +108,22 @@ class WhooingClient:
         start_date: str,
         end_date: str,
     ) -> list[dict[str, Any]]:
-        results = await self._get(
-            "/entries.json",
-            params={
-                "section_id": section_id,
-                "start_date": start_date,
-                "end_date": end_date,
-            },
-        )
-        return self._normalize_collection(results, key="entries")
+        """범위가 1년 초과면 자동 분할 후 병합 (DESIGN §4.2)."""
+        from whooing_mcp.dates import split_yearly_ranges
+
+        ranges = split_yearly_ranges(start_date, end_date)
+        out: list[dict[str, Any]] = []
+        for s, e in ranges:
+            results = await self._get(
+                "/entries.json",
+                params={
+                    "section_id": section_id,
+                    "start_date": s,
+                    "end_date": e,
+                },
+            )
+            out.extend(self._normalize_collection(results, key="entries"))
+        return out
 
     @staticmethod
     def _normalize_collection(results: Any, key: str) -> list[dict[str, Any]]:

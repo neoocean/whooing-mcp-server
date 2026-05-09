@@ -21,6 +21,7 @@ from whooing_mcp.auth import WhooingAuth
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
+from whooing_mcp.tools.dedup import find_duplicates
 
 log = logging.getLogger("whooing_mcp")
 
@@ -111,6 +112,33 @@ def build_mcp() -> FastMCP:
             client, sid = await _ensure_client_and_section(section_id)
             return await audit_recent_ai_entries(
                 client, section_id=sid, days=days, marker=marker
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "후잉 가계부에서 같은 금액 + 유사 item + ±tolerance_days 안 거래쌍을 "
+            "중복 후보로 반환합니다. 읽기 전용 — 결과는 _후보_ 만 보고하며, 실제 "
+            "삭제는 사용자 확인 후 공식 MCP 의 delete_entry 로 처리하세요."
+        )
+    )
+    async def whooing_find_duplicates(
+        start_date: str,
+        end_date: str,
+        section_id: str | None = None,
+        tolerance_days: int = 1,
+        min_similarity: float = 0.85,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await find_duplicates(
+                client,
+                section_id=sid,
+                start_date=start_date,
+                end_date=end_date,
+                tolerance_days=tolerance_days,
+                min_similarity=min_similarity,
             )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}

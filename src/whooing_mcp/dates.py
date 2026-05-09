@@ -37,3 +37,31 @@ def parse_yyyymmdd(s: str) -> str:
     # 실제 달력상 유효한 날짜인지 (예: 20260230 차단)
     datetime.strptime(s, "%Y%m%d")
     return s
+
+
+def date_diff_days(a: str, b: str) -> int:
+    """|date(a) - date(b)| 을 일 단위 정수로 반환. 입력은 YYYYMMDD."""
+    da = datetime.strptime(parse_yyyymmdd(a), "%Y%m%d")
+    db = datetime.strptime(parse_yyyymmdd(b), "%Y%m%d")
+    return abs((da - db).days)
+
+
+def split_yearly_ranges(start: str, end: str) -> list[tuple[str, str]]:
+    """후잉 entries.json 의 1년 제약(DESIGN §4.2)을 위해 365일 단위로 분할.
+
+    반환은 [(start1, end1), (start2, end2), ...] inclusive 범위. 분할이
+    필요 없으면 [(start, end)] 1개. start <= end 가정 (검증은 호출자).
+    """
+    parse_yyyymmdd(start)
+    parse_yyyymmdd(end)
+    s = datetime.strptime(start, "%Y%m%d")
+    e = datetime.strptime(end, "%Y%m%d")
+    if (e - s).days <= 365:
+        return [(start, end)]
+    out: list[tuple[str, str]] = []
+    cur = s
+    while cur <= e:
+        chunk_end = min(cur + timedelta(days=365), e)
+        out.append((cur.strftime("%Y%m%d"), chunk_end.strftime("%Y%m%d")))
+        cur = chunk_end + timedelta(days=1)
+    return out
