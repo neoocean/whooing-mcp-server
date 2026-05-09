@@ -5,7 +5,29 @@
 
 ## Unreleased
 
-* P2 `whooing_monthly_close` (audit + dedup + reconcile + suggest_category 합성).
+* (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
+  결정으로 진행 안 함.)
+
+## v0.1.3 — 2026-05-09
+
+P2 월말 정산 합성 도구.
+
+### Added
+
+* `whooing_monthly_close` — DESIGN v2 §14 P2 항목. 한 호출로:
+  * 거시 통계 (entries_count, total_money_sum, by_l_account top 10)
+  * audit (memo `[ai]` 마커)
+  * find_duplicates (월 범위)
+  * reconcile_csv 또는 reconcile_pdf (선택 — csv_path/pdf_path 인자)
+  * next_actions 가이드 배열 (한글 권고)
+
+  inputs: yyyymm (YYYYMM), section_id?, csv_path?, pdf_path?,
+  statement_issuer="auto", duplicate_tolerance_days=1,
+  duplicate_min_similarity=0.85, audit_marker="[ai]"
+
+### Tools after this release
+
+13개 — 신규 monthly_close 추가. 기존 12개 변동 없음.
 
 ## v0.1.2 — 2026-05-09
 

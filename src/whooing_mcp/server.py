@@ -23,6 +23,7 @@ from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.dedup import find_duplicates
+from whooing_mcp.tools.monthly_close import monthly_close
 from whooing_mcp.tools.pending import (
     confirm_pending,
     dismiss_pending,
@@ -415,6 +416,40 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         try:
             return await dismiss_pending(pending_id=pending_id, reason=reason)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "월말 정산 합성 도구. 한 달치 거래의 (1) 거시 통계, (2) LLM 입력 "
+            "거래(audit), (3) 중복 후보, (4) 카드명세서 정산(csv_path 또는 "
+            "pdf_path 지정 시) 을 한 번에 묶어 반환합니다. next_actions 배열에 "
+            "사용자 가이드 포함. yyyymm 은 'YYYYMM' 형식 (예: '202604')."
+        )
+    )
+    async def whooing_monthly_close(
+        yyyymm: str,
+        section_id: str | None = None,
+        csv_path: str | None = None,
+        pdf_path: str | None = None,
+        statement_issuer: str = "auto",
+        duplicate_tolerance_days: int = 1,
+        duplicate_min_similarity: float = 0.85,
+        audit_marker: str = "[ai]",
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await monthly_close(
+                client,
+                yyyymm=yyyymm,
+                section_id=sid,
+                csv_path=csv_path,
+                pdf_path=pdf_path,
+                statement_issuer=statement_issuer,
+                duplicate_tolerance_days=duplicate_tolerance_days,
+                duplicate_min_similarity=duplicate_min_similarity,
+                audit_marker=audit_marker,
+            )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 
