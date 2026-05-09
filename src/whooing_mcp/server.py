@@ -22,6 +22,7 @@ from whooing_mcp.client import WhooingClient
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.dedup import find_duplicates
+from whooing_mcp.tools.reconcile import csv_format_detect, reconcile_csv
 from whooing_mcp.tools.sms import parse_payment_sms
 
 log = logging.getLogger("whooing_mcp")
@@ -158,6 +159,51 @@ def build_mcp() -> FastMCP:
                 tolerance_days=tolerance_days,
                 min_similarity=min_similarity,
             )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "카드사 명세서 CSV 파일을 후잉 가계부 entries 와 매칭해 누락/잉여를 "
+            "반환합니다. issuer 는 'auto' (header 로 탐지), 'shinhan_card', "
+            "'kookmin_card' 중 하나. 읽기 전용 — 누락 항목 자동 입력 X, "
+            "사용자 확인 후 공식 MCP 의 add_entry 로 처리하세요."
+        )
+    )
+    async def whooing_reconcile_csv(
+        csv_path: str,
+        issuer: str = "auto",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        section_id: str | None = None,
+        tolerance_days: int = 2,
+        tolerance_amount: int = 0,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await reconcile_csv(
+                client,
+                csv_path=csv_path,
+                section_id=sid,
+                issuer=issuer,
+                start_date=start_date,
+                end_date=end_date,
+                tolerance_days=tolerance_days,
+                tolerance_amount=tolerance_amount,
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "CSV 파일 헤더만 보고 어떤 카드사 명세서 포맷인지 탐지합니다. "
+            "whooing_reconcile_csv 가 issuer=auto 로 매칭 실패 시 디버깅용. "
+            "API 호출 없음."
+        )
+    )
+    async def whooing_csv_format_detect(csv_path: str) -> dict:
+        try:
+            return await csv_format_detect(csv_path)
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 
