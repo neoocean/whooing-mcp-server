@@ -20,6 +20,13 @@ from mcp.server.fastmcp import FastMCP
 from whooing_mcp.auth import WhooingAuth
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.models import ToolError
+from whooing_mcp.tools.annotations import (
+    find_entries_by_hashtag,
+    get_entry_annotations,
+    list_hashtags,
+    remove_entry_note,
+    set_entry_note,
+)
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.dedup import find_duplicates
@@ -416,6 +423,83 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         try:
             return await dismiss_pending(pending_id=pending_id, reason=reason)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "후잉 거래 ID 에 _로컬_ 메모와 해시태그를 저장합니다. 후잉 서버의 "
+            "memo 는 변경하지 않음. hashtags 는 ['식비', '#출장'] 같은 list "
+            "또는 '#식비 #출장' 같은 string 모두 허용. note 또는 hashtags 중 "
+            "최소 하나는 필수."
+        )
+    )
+    async def whooing_set_entry_note(
+        entry_id: str,
+        note: str | None = None,
+        hashtags: str | list[str] | None = None,
+        section_id: str | None = None,
+    ) -> dict:
+        try:
+            return await set_entry_note(
+                entry_id=entry_id, note=note, hashtags=hashtags, section_id=section_id
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "한 개 또는 여러 entry_id 의 로컬 annotation (note + hashtags) 조회. "
+            "결과 dict 의 키는 entry_id. 로컬 데이터 없는 ID 는 누락."
+        )
+    )
+    async def whooing_get_entry_annotations(
+        entry_ids: str | list[str],
+    ) -> dict:
+        try:
+            return await get_entry_annotations(entry_ids)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "특정 entry_id 의 로컬 annotation 삭제. 후잉 서버의 거래 자체는 영향 X."
+        )
+    )
+    async def whooing_remove_entry_note(entry_id: str) -> dict:
+        try:
+            return await remove_entry_note(entry_id)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "로컬에 저장된 모든 unique 해시태그 + 사용 횟수. prefix 로 시작 매칭 필터."
+        )
+    )
+    async def whooing_list_hashtags(prefix: str | None = None) -> dict:
+        try:
+            return await list_hashtags(prefix=prefix)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "해시태그로 거래 조회 (역방향). 로컬에서 해당 태그가 붙은 entry_id "
+            "들을 찾고, 후잉에서 lookback_days 안의 거래 중 매칭하는 것을 fetch + "
+            "annotation 부착. lookback 밖의 entry_id 는 missing_in_remote_ids 로 보고."
+        )
+    )
+    async def whooing_find_entries_by_hashtag(
+        hashtag: str,
+        section_id: str | None = None,
+        lookback_days: int = 365,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await find_entries_by_hashtag(
+                client, hashtag=hashtag, section_id=sid, lookback_days=lookback_days
+            )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 

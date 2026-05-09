@@ -20,7 +20,7 @@ from typing import Any
 from whooing_mcp.dates import KST
 from datetime import datetime
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def default_queue_path() -> Path:
@@ -51,8 +51,13 @@ def open_db(path: Path | None = None):
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Schema v1 (CL 50660) + v2 (annotations, 본 CL).
+
+    CREATE IF NOT EXISTS 라 기존 v1 db 도 그대로 마이그레이션.
+    """
     conn.executescript(
         """
+        -- v1: pending queue (CL 50660)
         CREATE TABLE IF NOT EXISTS pending (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source TEXT NOT NULL,
@@ -65,14 +70,36 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_pending_queued_at
             ON pending(queued_at);
+
+        -- v2: entry annotations (본 CL)
+        CREATE TABLE IF NOT EXISTS entry_annotations (
+            entry_id TEXT PRIMARY KEY,
+            section_id TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS entry_hashtags (
+            entry_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (entry_id, tag),
+            FOREIGN KEY (entry_id) REFERENCES entry_annotations(entry_id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_hashtags_tag ON entry_hashtags(tag);
+
+        -- meta
         CREATE TABLE IF NOT EXISTS schema_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        -- foreign keys 활성화 (per-connection)
         """
     )
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(
-        "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', ?)",
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(SCHEMA_VERSION),),
     )
 
