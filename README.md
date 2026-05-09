@@ -1,58 +1,172 @@
 # whooing-mcp
 
-후잉 가계부([whooing.com](https://whooing.com))의 **공식 MCP 서버**(`https://whooing.com/mcp`)
-위에서 동작하는 **보완 도구 묶음**입니다. Claude Code / Claude Desktop 사용자는
-공식 MCP 와 본 wrapper MCP 를 함께 등록해, 자연어로 가계부를 다루면서 공식이
-제공하지 않는 영역(SMS 결제알림 파싱 / LLM 입력 audit / 카드명세서 CSV 정산)을
-추가로 사용합니다.
+후잉 가계부([whooing.com](https://whooing.com))를 **Claude Code / Claude
+Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MCP 서버** 와
+함께 등록해 사용하는 **보완(wrapper) MCP 서버** 입니다.
 
-> 본 서버는 **거래 입력/수정/삭제 같은 기본 CRUD 는 제공하지 않습니다.** 그것은
-> 공식 MCP (`https://whooing.com/mcp`) 가 합니다. 본 서버를 단독으로 등록해선
-> 의미가 적습니다 — 공식과 함께 등록하세요.
+```
+            ┌──────────────────────────────────────┐
+            │  Claude (Desktop / Code / mcp host)  │
+            └─────────────┬──────────────┬─────────┘
+                          │              │
+                  (stdio) │              │ (HTTP, mcp-remote)
+                          ▼              ▼
+            ┌──────────────────┐  ┌──────────────────────┐
+            │ whooing-extras   │  │ whooing (공식)       │
+            │ (본 프로젝트)    │  │ whooing.com/mcp      │
+            │                  │  │                      │
+            │ • SMS parser     │  │ • 거래 CRUD          │
+            │ • dedup          │  │ • 보고서 / P&L       │
+            │ • audit          │  │ • 예산 / 장기목표    │
+            │ • CSV reconcile  │  │ • 매월입력 / 빈번    │
+            │ • CSV detect     │  │ • 포스트잇 / BBS     │
+            └────────┬─────────┘  └──────────┬───────────┘
+                     │                       │
+                     └────────► 같은 AI 토큰 ◄────────
+                                     │
+                                     ▼
+                             후잉 REST API
+```
 
-## v0.1 (CL #1) 도구 1개
+> **두 MCP 모두 등록하는 게 정상 사용법입니다.** 공식 MCP 가 거래 입력/수정/
+> 삭제·보고서·예산 등 핵심을 책임지고, 본 wrapper 가 공식이 안 주는 영역을
+> 채웁니다 (SMS 알림 파싱 / LLM 입력 audit / 카드명세서 정산).
 
-| 도구 | 설명 |
-|---|---|
-| `whooing_audit_recent_ai_entries` | 최근 N일 거래 중 LLM 이 입력한 것만 골라봅니다 (memo 접두 마커 기준) |
+---
 
-다음 CL 에서 추가 예정: `whooing_find_duplicates`, `whooing_parse_payment_sms`,
-`whooing_reconcile_csv`, `whooing_csv_format_detect` (DESIGN.md §6 참조).
+## 목차
 
-## Quickstart
+- [v0.1 wrapper 도구 5개](#v01-wrapper-도구-5개)
+- [Quickstart (5분)](#quickstart-5분)
+  - [1. AI 연동 토큰 발급](#1-ai-연동-토큰-발급)
+  - [2. 공식 후잉 MCP 등록](#2-공식-후잉-mcp-등록)
+  - [3. 본 wrapper 설치 + 등록](#3-본-wrapper-설치--등록)
+- [도구 reference](#도구-reference)
+- [`[ai]` 마커 컨벤션 — 중요](#ai-마커-컨벤션--중요)
+- [워크플로우 예시](#워크플로우-예시)
+  - [매일: SMS 알림 → 입력](#매일-sms-알림--입력)
+  - [주간: audit + dedup](#주간-audit--dedup)
+  - [매월: 카드명세서 reconcile](#매월-카드명세서-reconcile)
+- [트러블슈팅](#트러블슈팅)
+- [개발](#개발)
+- [참고 / 라이선스](#참고--라이선스)
+
+---
+
+## v0.1 wrapper 도구 5개
+
+| 도구 | 한 줄 설명 | API 호출 |
+|---|---|---|
+| `whooing_audit_recent_ai_entries` | 최근 N일 거래 중 LLM 이 입력한 것만 (memo 마커 기준) | GET /entries |
+| `whooing_find_duplicates` | 같은 금액 + 유사 item + ±N일 거래쌍을 중복 후보로 | GET /entries |
+| `whooing_parse_payment_sms` | SMS / Push 결제 알림 텍스트 → 후잉 항목 dict | (없음) |
+| `whooing_reconcile_csv` | 카드사 명세서 CSV ↔ 후잉 entries 매칭, 누락/잉여 보고 | GET /entries |
+| `whooing_csv_format_detect` | CSV 헤더 기반 카드사 자동 탐지 (디버깅) | (없음) |
+
+**모두 read-only.** 입력/수정/삭제는 LLM 이 사용자 확인 후 **공식 MCP** 의
+`add_entry` / `update_entry` / `delete_entry` 로 처리합니다.
+
+---
+
+## Quickstart (5분)
 
 ### 1. AI 연동 토큰 발급
 
 후잉 → **사용자 > 계정 > 비밀번호 및 보안 > AI 토큰 발급**
 
-발급된 토큰은 `__eyJh...` 로 시작합니다. **앞 underscore 2개 포함 전체**가
-토큰입니다 (자주 놓치는 함정).
+- 토큰은 `__eyJh...` 로 시작 (앞 underscore 2개 포함 전체)
+- scope: `read` / `write` / `messages` / `post_it` / `bbs` 중 발급 시 선택
+- 본 wrapper 만 쓰려면 `read` 만 있으면 됨
+- 공식 MCP 로 거래도 입력하려면 `write` 까지 체크
 
-scope 는 본 서버 v0.1 기준 `read` 만 있으면 됩니다 (입력은 공식 MCP 가 함).
+> **권장:** 본 가계부와 별도로 **테스트 섹션** 1개를 만든 뒤 모든 작업을
+> 그 섹션에서 검증하세요. 본 가계부에 즉시 연결하면 LLM 의 학습 곡선 동안
+> 의도치 않은 입력 위험이 있습니다.
 
-### 2. 설치
+### 2. 공식 후잉 MCP 등록
+
+세 가지 방법 중 환경에 맞는 것 1개:
+
+#### A. Claude Desktop Connectors UI (Pro/Max/Team/Enterprise)
+
+설정 파일을 안 건드리고 UI 만으로:
+
+1. Claude Desktop → **Settings → Connectors → Add custom connector**
+2. URL 에 `https://whooing.com/mcp` 입력
+3. 후잉 로그인 + scope 권한 승인 (OAuth)
+
+이 방법은 OAuth 라 별도 토큰 입력이 필요 없습니다.
+
+#### B. Claude Desktop + mcp-remote (모든 플랜)
+
+설정 파일 직접 편집:
+
+```
+Mac:     ~/Library/Application Support/Claude/claude_desktop_config.json
+Windows: %APPDATA%\Claude\claude_desktop_config.json
+```
+
+```json
+{
+  "mcpServers": {
+    "whooing": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://whooing.com/mcp",
+        "--header", "X-API-Key: __eyJh..."
+      ]
+    }
+  }
+}
+```
+
+> Windows 는 `npx` 대신 `npx.cmd`.
+
+#### C. Claude Code CLI
+
+```bash
+# 사용자 전체에 등록 (권장)
+claude mcp add --transport http whooing https://whooing.com/mcp \
+  --header "X-API-Key: __eyJh..." --scope user
+
+# 프로젝트별 (--scope 생략)
+claude mcp add --transport http whooing https://whooing.com/mcp \
+  --header "X-API-Key: __eyJh..."
+```
+
+검증: `claude mcp list` → `whooing` 보이면 성공.
+
+### 3. 본 wrapper 설치 + 등록
+
+#### 3.1 설치
 
 ```bash
 git clone https://github.com/neoocean/whooing-mcp-server
 cd whooing-mcp-server
-python3.11 -m venv .venv
-source .venv/bin/activate
+python3.11 -m venv .venv      # 또는 3.12+
+source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-### 3. `.env` 작성
+#### 3.2 `.env` 작성
 
 ```bash
 cp .env.example .env
-$EDITOR .env  # WHOOING_AI_TOKEN 채우기
+$EDITOR .env
 ```
 
-`WHOOING_SECTION_ID` 는 옵션입니다 (미설정 시 첫 섹션 자동). 여러 가계부를
-가지셨다면 명시 권장.
+```
+WHOOING_AI_TOKEN=__eyJh...
+WHOOING_SECTION_ID=s133178   # 권장: 테스트 섹션. 미설정 시 첫 섹션 자동
+```
 
-### 4. Claude Desktop 등록 — 공식 + 우리 wrapper 둘 다
+`WHOOING_SECTION_ID` 가 미설정이면 첫 섹션이 자동 선택됩니다 — 의도치 않은
+가계부가 잡힐 수 있어 **명시 강력 권장**.
 
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
+#### 3.3 Claude Desktop 등록 — 공식 + 우리 둘 다
+
+`claude_desktop_config.json`:
 
 ```json
 {
@@ -63,57 +177,297 @@ $EDITOR .env  # WHOOING_AI_TOKEN 채우기
                "--header", "X-API-Key: __eyJh..."]
     },
     "whooing-extras": {
-      "command": "python",
+      "command": "/Users/<you>/path/to/whooing-mcp-server/.venv/bin/python",
       "args": ["-m", "whooing_mcp"],
       "env": {
-        "WHOOING_AI_TOKEN": "__eyJh..."
+        "WHOOING_AI_TOKEN": "__eyJh...",
+        "WHOOING_SECTION_ID": "s133178"
       }
     }
   }
 }
 ```
 
-`examples/claude_desktop_config.json` 에 동일한 템플릿이 있습니다.
+`examples/claude_desktop_config.json` 에 동일 템플릿 있음.
 
-### 5. Claude Code (CLI)
+#### 3.4 Claude Code 등록 (대안)
+
+`claude mcp add` 는 자체 옵션과 sub-command 의 옵션을 분리하기 위해 **`--`
+구분자** 가 필요합니다 (`-m whooing_mcp` 가 자체 옵션으로 잘못 해석되는
+것을 방지). venv 의 python 절대경로 사용 권장.
 
 ```bash
-# 공식 MCP
-claude mcp add --transport http whooing https://whooing.com/mcp \
-  --header "X-API-Key: __eyJh..." --scope user
-
-# 본 wrapper (cwd 가 이 프로젝트일 때 .env 자동 로드)
-claude mcp add whooing-extras python -m whooing_mcp --scope user
+# .env 가 cwd 와 무관하게 동작하도록 환경변수도 함께 박는 것을 권장
+claude mcp add whooing-extras \
+  --scope user \
+  -e WHOOING_AI_TOKEN="__eyJh..." \
+  -e WHOOING_SECTION_ID="s133178" \
+  -- /Users/<you>/path/to/whooing-mcp-server/.venv/bin/python \
+     -m whooing_mcp
 ```
+
+`-e` 없이 `.env` 자동 로드만 쓰려면 `cwd` 가 프로젝트 디렉터리여야 합니다 —
+launch context 에 따라 보장이 어렵기 때문에 명시적 `-e` 권장.
+
+검증:
+```bash
+claude mcp list                  # whooing + whooing-extras 둘 다 보여야
+```
+
+#### 3.5 검증
+
+Claude 와 새 대화를 시작하고:
+
+> "내 후잉 섹션 목록 보여줘"
+
+→ 공식 MCP 가 응답.
+
+> "지난 7일 동안 LLM 이 입력한 거래 보여줘"
+
+→ 본 wrapper 의 `whooing_audit_recent_ai_entries` 가 호출됨 (지금은 0개일
+것이고 정상).
+
+---
+
+## 도구 reference
+
+각 도구의 입력/출력은 DESIGN §6 에 명세. 아래는 LLM 호출 관점의 요약.
+
+### `whooing_audit_recent_ai_entries`
+
+LLM 이 (사용자 위임으로) 입력한 거래만 조회.
+
+```
+입력: days=7, marker="[ai]", section_id=null
+출력: { entries: [...], total, marker_used, section_id, date_range, scanned_total, note }
+```
+
+자연어 트리거:
+> "지난 주에 너가 입력한 거래 다 보여줘"
+> "최근 30일 동안 [ai] 로 시작하는 메모만 골라봐"
+
+### `whooing_find_duplicates`
+
+중복 후보 탐지. 자동 삭제 안 함.
+
+```
+입력: start_date, end_date, section_id?, tolerance_days=1, min_similarity=0.85
+출력: { pairs: [{entry_a, entry_b, why: [...]}], total_checked, ... }
+```
+
+자연어:
+> "이번 달 후잉에 중복 입력된 거래 있는지 찾아봐"
+> "5월 1일~5월 9일 사이에 같은 금액·비슷한 가맹점인 거래쌍 알려줘"
+
+### `whooing_parse_payment_sms`
+
+SMS / Push 알림 → 항목 dict. **API 호출 없음**.
+
+```
+입력: text, issuer_hint="auto"  (auto / shinhan_card / kookmin_card)
+출력: { proposed_entry: {...}, confidence, notes, parser_used, next_step_hint }
+       또는 매칭 실패 시 { proposed_entry: null, supported_issuers: [...] }
+```
+
+자연어:
+> "[Web발신] 신한카드(1234)승인 ... 6,200원 ... 스타벅스 ... 이거 후잉에
+> 입력해줘"
+
+LLM 흐름: parse → 사용자 확인 → 공식 MCP 의 `add_entry` 호출 (memo 첫
+단어로 `[ai]` 권장).
+
+### `whooing_reconcile_csv`
+
+카드사 명세서 CSV ↔ 후잉 entries 매칭.
+
+```
+입력: csv_path (절대), issuer="auto", start_date?, end_date?, section_id?,
+      tolerance_days=2, tolerance_amount=0
+출력: { summary: {csv_total, whooing_total, matched_count,
+                  missing_in_whooing_count, extra_in_whooing_count},
+        matched, missing_in_whooing, extra_in_whooing,
+        adapter_used, ... }
+```
+
+자연어:
+> "/Users/me/Downloads/shinhan_2026_05.csv 와 후잉 5월 거래 비교해줘"
+
+LLM 흐름: reconcile → 사용자 확인 → 누락 항목별 add_entry.
+
+지원 카드사 (v0.1): `shinhan_card`, `kookmin_card`. 추가는 §개발 참조.
+
+### `whooing_csv_format_detect`
+
+CSV 헤더만 보고 카드사 추측 (디버깅용).
+
+```
+입력: csv_path (절대)
+출력: { detected_issuer, confidence, header_sample, column_mapping_proposed,
+        supported_issuers }
+```
+
+`reconcile_csv` 가 `issuer=auto` 로 매칭 실패할 때 사용.
+
+---
 
 ## `[ai]` 마커 컨벤션 — 중요
 
-`whooing_audit_recent_ai_entries` 가 LLM 입력 거래를 추적하려면 **컨벤션**이
-필요합니다. 공식 MCP 의 `add_entry` 도구에 우리가 hook 을 못 거므로, LLM 에게
-"사용자 위임으로 거래를 입력할 때 memo 첫 단어로 `[ai]` 를 붙여라" 라고
-안내해야 합니다.
+`whooing_audit_recent_ai_entries` 가 LLM 이 입력한 거래를 추적하려면
+**컨벤션** 이 필요합니다. 공식 MCP 의 `add_entry` 도구에 우리가 hook 을
+못 거므로, LLM 에 다음을 안내해야 합니다:
 
-Claude 와의 대화 시작 시 다음과 같이 시스템 프롬프트나 첫 발화에 박아두면
-좋습니다:
+> **사용자 위임으로 거래를 입력할 때 memo 첫 단어를 `[ai]` 로 시작해.**
 
-> 후잉 가계부에 거래를 입력할 때, 내가 명시적으로 위임한 경우 memo 의 첫
-> 단어를 `[ai]` 로 시작해줘. 예: `memo="[ai] 강남 스타벅스"`. 그래야
-> `whooing_audit_recent_ai_entries` 로 나중에 추적할 수 있어.
+대화 시작 부 또는 시스템 프롬프트에 박아두세요:
+
+```
+후잉에 거래를 입력할 때, 내가 명시적으로 위임한 경우 add_entry 의
+memo 필드 첫 단어를 '[ai]' 로 시작해줘. 예:
+  memo='[ai] 강남 스타벅스 음성 위임'
+그래야 whooing_audit_recent_ai_entries 로 나중에 추적할 수 있어.
+```
+
+(Claude Code 사용자라면 `~/.claude/CLAUDE.md` 또는 프로젝트 `CLAUDE.md` 에
+명시.)
+
+---
+
+## 워크플로우 예시
+
+### 매일: SMS 알림 → 입력
+
+1. 카드 결제 → 카드사 SMS 도착
+2. 텍스트 복사
+3. Claude 에:
+   > "이거 후잉에 넣어줘:
+   > [Web발신]
+   > 신한카드(1234)승인
+   > 홍****님
+   > 6,200원 일시불
+   > 05/09 14:23
+   > 스타벅스강남점"
+4. Claude 가 `whooing_parse_payment_sms` 호출 → proposed_entry dict
+5. Claude 가 사용자에게:
+   > "스타벅스강남점에서 6,200원 (신한카드 일시불, 5/9). 외식 카테고리
+   > 맞아? 메모는 비워둬도 돼?"
+6. 사용자 "응"
+7. Claude 가 공식 MCP 의 `add_entry` 호출:
+   - section_id, entry_date=20260509, money=6200,
+     l_account="외식", r_account="신한카드",
+     item="스타벅스강남점", **memo="[ai] SMS 위임"**
+8. 완료 보고
+
+### 주간: audit + dedup
+
+매주 일요일:
+> "지난 주에 너가 입력한 거래 다 보여주고, 중복으로 보이는 거 있는지도 같이
+> 찾아줘"
+
+→ Claude 가 `whooing_audit_recent_ai_entries(days=7)` + `whooing_find_duplicates(start_date=일주일전, end_date=오늘)` 호출. 결과를 사용자에게 보여주고, 중복 후보가 있으면 "이 쌍 중 어느 걸 지울까?" 질문.
+
+### 매월: 카드명세서 reconcile
+
+매월 5일 (전월 명세 도착 후):
+
+1. 카드사 사이트에서 4월 명세 CSV 다운로드 → `~/Downloads/shinhan_2026_04.csv`
+2. Claude 에:
+   > "이 파일이랑 후잉 4월 거래 비교해줘: /Users/me/Downloads/shinhan_2026_04.csv"
+3. Claude 가 `whooing_reconcile_csv(csv_path=..., issuer='auto')` 호출
+4. 결과 요약:
+   - matched: 42건
+   - missing_in_whooing: 5건 (CSV 에 있는데 후잉에 없는 거래)
+   - extra_in_whooing: 2건 (후잉에 있는데 CSV 에 없는 거래)
+5. Claude 가:
+   > "5건 누락 발견. 다음과 같아: ... 다 입력할까?"
+6. 사용자 "응" → Claude 가 5번 `add_entry` (각 memo `[ai] CSV 정산`)
+7. extra 2건은 사용자가 수동 확인 (환불/현금/타카드 가능성)
+
+---
 
 ## 트러블슈팅
 
 | 증상 | 원인 / 해결 |
 |---|---|
-| `WHOOING_AI_TOKEN 미설정` | `.env` 파일이 cwd 에 없거나 키 이름 오타. `.env.example` 참고. |
-| 도구 응답에 `error.kind="AUTH"` | 토큰 만료/revoke. 후잉에서 재발급 후 .env 갱신. |
-| 도구 응답에 `error.kind="RATE_LIMIT"` | 분당 20회 / 일 20,000회 한도. `rest_of_api` 잔량 확인. |
-| 의도와 다른 가계부 데이터가 보임 | `WHOOING_SECTION_ID` 미설정 → 첫 섹션 자동 선택됨. .env 에 명시. |
+| `WHOOING_AI_TOKEN 미설정` | `.env` 가 cwd 에 없거나 키 이름 오타. `.env.example` 참고. Claude Desktop 의 `env` 블록에 직접 박아도 됨 |
+| `error.kind="AUTH"` | 토큰 만료/revoke. 후잉에서 재발급 후 .env (그리고 Claude Desktop config) 갱신. |
+| `error.kind="RATE_LIMIT"` (`code=402`) | 일일 20,000회 초과. 응답의 `rest_of_api` 가 0 에 가까움. 다음날까지 대기 |
+| `error.kind="RATE_LIMIT"` (`code=429`) | 분당 20회 초과. 1분 대기 후 재시도 |
+| 의도와 다른 가계부 데이터 | `WHOOING_SECTION_ID` 미설정 → 첫 섹션 자동. .env 명시 |
+| `whooing_parse_payment_sms` 가 매칭 실패 | 지원 issuer 외 (`supported_issuers` 응답 확인). 새 패턴은 `parsers/sms/<issuer>.py` 추가 |
+| `whooing_reconcile_csv: 'CSV format not detected'` | header 키워드가 알려진 패턴과 다름. `whooing_csv_format_detect` 호출해 header_sample 확인 후 adapter 보강 |
+| Claude Desktop 에서 `whooing-extras` 가 안 보임 | config 의 `command` 가 venv 의 `python` 절대경로인지 확인 (전역 python 으로는 import 실패) |
+| `claude mcp add ... python -m whooing_mcp` → `error: unknown option '-m'` | `--` 로 자체 옵션과 sub-command 분리 필요. `claude mcp add <name> [options] -- <cmd> [<args>...]` 형식. README §3.4 예시 참조 |
+| 같은 도구 이름이 두 서버에 노출되어 LLM 이 혼동 | 본 wrapper 는 공식과 이름 겹치지 않게 `whooing_*` prefix + `_extras` 같은 변별 미사용. 그래도 헷갈리면 사용자 프롬프트에 "extras 의 X 도구를 써" 명시 |
 
-## 라이선스
+---
+
+## 개발
+
+### 의존성
+
+`Python 3.11+`, `pip install -e .[dev]` 가 dev 도구까지 설치
+(`pytest`, `pytest-asyncio`, `respx`).
+
+### 테스트
+
+```bash
+source .venv/bin/activate
+pytest -q
+# 72 passed (CL #4 시점)
+```
+
+테스트는 모두 합성 fixture 기반이라 후잉 자격증명 불필요.
+
+### Live smoke (수동, 후잉 자격증명 필요)
+
+```bash
+python tests/_live_smoke.py [--section <id>] [--days 90]
+```
+
+- `.env` 에서 `WHOOING_AI_TOKEN` + (선택) `WHOOING_SECTION_ID` 로드
+- `/sections.json` + `/entries.json` 호출 검증
+- 응답 shape 만 stderr 출력 (실 값은 안 찍음)
+- fixture 는 합성 (`tests/_live_smoke.py` 의 `SYNTHETIC_*`) 만 commit
+
+### 새 SMS issuer 추가
+
+1. `src/whooing_mcp/parsers/sms/<issuer>.py` 작성
+   - `ISSUER`, `ACCOUNT_GUESS`, `parse(text) -> ParseResult | None`
+2. `src/whooing_mcp/parsers/sms/__init__.py` 의 `_REGISTRY` 에 등록
+3. `tests/fixtures/sms/<issuer>_*.txt` 합성 샘플 추가
+4. `tests/test_sms_parsers.py` 에 회귀 테스트 추가
+
+### 새 CSV adapter 추가
+
+1. `src/whooing_mcp/csv_adapters/<issuer>.py` 작성
+   - `ISSUER`, `score_header(header) -> float`,
+     `propose_mapping(header) -> dict`, `parse_csv(path) -> [CSVRow]`
+2. `src/whooing_mcp/csv_adapters/__init__.py` 의 `_REGISTRY` 에 등록
+3. `tests/fixtures/csv/<issuer>_sample.csv` 합성 샘플
+4. `tests/test_csv_adapters.py` 에 회귀
+
+### 설계 / 결정 이력
+
+- [DESIGN.md](DESIGN.md) — 전체 설계 (v2 wrapper 모델). v1 폐기 사유,
+  CRUD 미지원 결정, 5 도구 명세, rate limit, 보안 가드 등.
+
+---
+
+## 참고 / 라이선스
+
+### 후잉 공식
+
+- [whooing.com](https://whooing.com)
+- [whooing.com/mcp](https://whooing.com/mcp) — 공식 MCP 서버 가이드
+- [whooing.com/api/docs](https://whooing.com/api/docs) — REST API
+- 문의: support@whooing.com
+
+### MCP
+
+- [modelcontextprotocol.io](https://modelcontextprotocol.io)
+- [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) — HTTP MCP 를
+  stdio 로 bridging 하는 NPX
+
+### 라이선스
 
 MIT.
-
-## 설계 / 결정 이력
-
-- [DESIGN.md](DESIGN.md) — 전체 설계 (v2 wrapper 모델).
-- v1 (자체 구현 안) 폐기 사유는 DESIGN §0, §3 참조.
