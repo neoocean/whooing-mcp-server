@@ -22,6 +22,7 @@ from whooing_mcp.client import WhooingClient
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.dedup import find_duplicates
+from whooing_mcp.tools.sms import parse_payment_sms
 
 log = logging.getLogger("whooing_mcp")
 
@@ -113,6 +114,23 @@ def build_mcp() -> FastMCP:
             return await audit_recent_ai_entries(
                 client, section_id=sid, days=days, marker=marker
             )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "SMS / Push 결제 알림 텍스트 한 덩어리를 후잉 항목 후보(dict)로 "
+            "변환합니다. 후잉 API 호출 없음. 결과를 사용자에게 보여주고 확인 "
+            "받은 후, 공식 MCP 의 add_entry 로 입력하세요 (memo 첫 단어로 "
+            "'[ai]' 권장)."
+        )
+    )
+    async def whooing_parse_payment_sms(
+        text: str,
+        issuer_hint: str = "auto",
+    ) -> dict:
+        try:
+            return await parse_payment_sms(text, issuer_hint=issuer_hint)
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 
