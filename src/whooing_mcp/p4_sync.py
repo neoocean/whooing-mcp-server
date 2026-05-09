@@ -17,6 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from whooing_mcp.config import load_config
 from whooing_mcp.queue import default_queue_path
 
 log = logging.getLogger(__name__)
@@ -63,11 +64,22 @@ def is_db_in_depot(db_path: Path) -> bool:
 def sync_db_to_p4(action_summary: str) -> dict:
     """db 가 변경됐다면 새 numbered CL 만들고 submit.
 
+    Config (whooing-mcp.toml [p4_sync] enabled) 가 false 면 silent skip.
+    default 는 false — GitHub clone 사용자가 무심코 P4 명령 실패 안 보도록.
+
     Returns:
       { ok: bool, skipped: bool, cl?: int, message: str }
-      ok=True && skipped=True 면 변경 없거나 P4 환경 없음 (정상).
+      ok=True && skipped=True 면 변경 없거나 P4 환경 없거나 옵션 OFF (정상).
       ok=False 면 사용자에게 알릴 가치 있는 실패.
     """
+    cfg = load_config()
+    if not cfg.p4_sync_enabled:
+        return {
+            "ok": True,
+            "skipped": True,
+            "message": "config: p4_sync 비활성화 (whooing-mcp.toml [p4_sync] enabled=true 로 켜기)",
+        }
+
     db_path = default_queue_path()
 
     if not db_path.exists():

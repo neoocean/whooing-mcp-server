@@ -16,6 +16,10 @@ venv/
 .env.*
 !.env.example
 
+# 실 사용자 config (P4 only). .example 만 git 으로.
+whooing-mcp.toml
+!whooing-mcp.toml.example
+
 # SQLite db (queue + annotations) — P4 에는 sync, GitHub 에는 절대 X
 # (사용자 정책 2026-05-09: cross-machine via P4 만)
 queue.db

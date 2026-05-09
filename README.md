@@ -242,7 +242,21 @@ claude mcp add whooing-extras --scope user \
 claude mcp list                  # whooing + whooing-extras 둘 다 보여야
 ```
 
-#### 3.5 검증
+#### 3.5 (선택) `whooing-mcp.toml` 옵션
+
+대부분의 사용자는 기본값으로 충분 — 만들 필요 없음. 옵션을 조정하고
+싶으면:
+
+```bash
+cp whooing-mcp.toml.example whooing-mcp.toml
+$EDITOR whooing-mcp.toml
+```
+
+현재 노출된 옵션은 `[p4_sync] enabled` 하나 (default `false`). 자세한
+설명은 `.example` 파일의 주석 참조. 본 toml 도 `.gitignore` 차단 — 머신
+간 동기화 책임은 사용자에게.
+
+#### 3.6 검증
 
 Claude 와 새 대화를 시작하고:
 

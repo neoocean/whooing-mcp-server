@@ -14,10 +14,21 @@ from whooing_mcp import p4_sync
 
 
 @pytest.fixture(autouse=True)
-def reset_p4_cache(monkeypatch):
-    """매 테스트마다 _P4_AVAILABLE 캐시 초기화."""
+def reset_p4_cache(monkeypatch, tmp_path):
+    """매 테스트마다 _P4_AVAILABLE + config 캐시 초기화 + p4_sync 강제 enabled.
+
+    config disabled 가 default 라 다른 모든 테스트는 always-skipped 가
+    되므로, 명시적으로 p4_sync 강제 활성화. config disabled 케이스는
+    별도 테스트.
+    """
+    from whooing_mcp import config as config_mod
     monkeypatch.setattr(p4_sync, "_P4_AVAILABLE", None)
+    config_mod.reset_cache()
+    cfg_file = tmp_path / "test-config.toml"
+    cfg_file.write_text('[p4_sync]\nenabled = true\n')
+    monkeypatch.setenv("WHOOING_CONFIG", str(cfg_file))
     yield
+    config_mod.reset_cache()
 
 
 @pytest.fixture
@@ -70,6 +81,18 @@ def test_skip_when_db_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("WHOOING_QUEUE_PATH", str(tmp_path / "nonexistent.sqlite"))
     out = p4_sync.sync_db_to_p4("test")
     assert out["ok"] is True and out["skipped"] is True
+
+
+def test_skip_when_config_disabled(tmp_db_in_path, monkeypatch, tmp_path):
+    """config 의 p4_sync.enabled=false 면 즉시 silent skip — db / p4 검사 X."""
+    from whooing_mcp import config as config_mod
+    config_mod.reset_cache()
+    cfg_file = tmp_path / "off.toml"
+    cfg_file.write_text('[p4_sync]\nenabled = false\n')
+    monkeypatch.setenv("WHOOING_CONFIG", str(cfg_file))
+    out = p4_sync.sync_db_to_p4("test")
+    assert out["ok"] is True and out["skipped"] is True
+    assert "비활성화" in out["message"]
 
 
 def test_skip_when_p4_unavailable(tmp_db_in_path, monkeypatch):

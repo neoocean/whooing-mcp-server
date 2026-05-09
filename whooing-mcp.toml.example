@@ -1,0 +1,26 @@
+# whooing-mcp-server-wrapper 설정 — 템플릿
+#
+# 사용법:
+#   1. 이 파일을 'whooing-mcp.toml' 로 복사:
+#        cp whooing-mcp.toml.example whooing-mcp.toml
+#   2. 필요한 옵션 활성화/조정.
+#   3. 'whooing-mcp.toml' 은 .gitignore 가 차단하므로 안전.
+#
+# 탐색 우선순위 (서버가 먼저 발견된 1개를 사용):
+#   1. $WHOOING_CONFIG (절대 경로 override)
+#   2. <project root>/whooing-mcp.toml
+#   3. ~/.config/whooing-mcp/config.toml
+
+[p4_sync]
+# SQLite db (queue + annotations) 의 자동 Perforce sync.
+#
+# false (default — 안전): 동기화 안 함. db 는 로컬에서만 사용. 일반적인
+#                         GitHub 다운로더에게 권장.
+# true:                   매 modifying 도구 호출 후 변경된 db 를 별도
+#                         numbered Perforce CL 로 자동 commit. P4 워크
+#                         스페이스가 셋업된 환경에서만 의미. 켤 때 주의:
+#                           * `p4 info` 가 동작해야 함
+#                           * db 파일이 P4 depot 에 등록돼 있어야 함
+#                             (`p4 add -t binary <db_path>` 1회 setup)
+#                           * 모든 도구 호출이 P4 명령 시간만큼 느려짐
+enabled = false

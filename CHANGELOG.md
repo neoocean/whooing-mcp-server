@@ -8,6 +8,30 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## v0.1.7 — 2026-05-09
+
+옵션 설정 파일 layer 도입.
+
+### Added
+
+* `src/whooing_mcp/config.py` — TOML 기반 옵션 파일 로더. tomllib (Python
+  3.11+) 사용. 탐색 우선순위: `$WHOOING_CONFIG` → `<project>/whooing-mcp.toml`
+  → `~/.config/whooing-mcp/config.toml`. 캐시 + force_reload 지원.
+* `whooing-mcp.toml.example` — 모든 옵션 default OFF + 사용법 주석.
+  GitHub 에 공개.
+* `whooing-mcp.toml` — 사용자 본인 config. `.gitignore` 차단으로 GitHub 미반영.
+
+### Changed
+
+* `p4_sync.sync_db_to_p4()` — config 의 `[p4_sync] enabled` 검사 추가.
+  false 면 즉시 silent skip. default OFF — GitHub clone 사용자가 무심코
+  P4 명령 실패 안 보도록.
+
+### Documentation
+
+* DESIGN §8.4 신규 (옵션 설정 파일).
+* README §3.5 신규 (whooing-mcp.toml 옵션 안내).
+
 ## v0.1.6 — 2026-05-09 (docs)
 
 ### Documentation

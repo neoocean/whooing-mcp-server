@@ -496,6 +496,32 @@ Desktop config 의 `env` block 으로 토큰을 박는 옵션은 **권장하지 
 revoke 시 401/405 → 캐시 무효화 + 한글 메시지 "AI 토큰이 거부되었습니다.
 후잉 → 사용자 > 계정 > 비밀번호 및 보안 에서 재발급". 자동 재시도 X.
 
+### §8.4 옵션 설정 파일 (`whooing-mcp.toml`)
+
+자격증명과 별개로, 동작 옵션은 TOML 파일로 분리 (default 보수적 OFF).
+
+**탐색 우선순위** (먼저 발견된 1개):
+
+1. `$WHOOING_CONFIG` (override path)
+2. `<project root>/whooing-mcp.toml`
+3. `~/.config/whooing-mcp/config.toml`
+
+**현재 노출된 옵션** (v0.1.7):
+
+| 섹션.키 | 타입 | default | 의미 |
+|---|---|---|---|
+| `[p4_sync] enabled` | bool | **false** | SQLite db 변경 시 자동 동기화 (특정 워크스페이스 운영자만 ON; 일반 GitHub 사용자 OFF) |
+
+**파일 분리 정책:**
+
+- `whooing-mcp.toml` — 사용자 머신 별 실 config. **`.gitignore` 차단** —
+  GitHub 으로 안 감.
+- `whooing-mcp.toml.example` — 템플릿. 모든 옵션 default OFF + 주석 설명.
+  GitHub 에 공개.
+
+옵션 추가 시 default 는 **항상 보수적** (외부 시스템 조작 = OFF). example
+파일에 주석으로 의미 + 트레이드오프 설명.
+
 ---
 
 ## §9. 에러 + rate limit
