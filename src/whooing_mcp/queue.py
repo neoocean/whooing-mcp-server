@@ -20,7 +20,7 @@ from typing import Any
 from whooing_mcp.dates import KST
 from datetime import datetime
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def default_queue_path() -> Path:
@@ -132,6 +132,25 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_import_source ON statement_import_log(source_file);
         CREATE INDEX IF NOT EXISTS idx_import_entry_date ON statement_import_log(entry_date);
         CREATE INDEX IF NOT EXISTS idx_import_whooing_entry ON statement_import_log(whooing_entry_id);
+
+        -- v4: 거래 ↔ 첨부파일 (1:N). 후잉이 entry-attachment 를 미지원해서 본
+        -- wrapper 가 별도 layer 로 보관. 파일은 ./attachments/files/YYYY/YYYY-MM-DD/
+        -- 하위. 같은 sha256 은 dedup (같은 파일 한 번만 디스크에).
+        CREATE TABLE IF NOT EXISTS entry_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT NOT NULL,           -- 후잉 entry_id (외부 키 — 무결성 강제 X)
+            section_id TEXT,                   -- 컨텍스트
+            file_path TEXT NOT NULL,           -- relative: attachments/files/2026/2026-05-09/foo.pdf
+            original_path TEXT,                -- 원본 absolute path (소스 추적)
+            original_filename TEXT NOT NULL,
+            file_size_bytes INTEGER,
+            file_sha256 TEXT,                  -- 중복 감지
+            mime_type TEXT,
+            note TEXT,                         -- 첨부 사유 / 사용자 메모
+            attached_at TEXT NOT NULL          -- ISO 8601 KST
+        );
+        CREATE INDEX IF NOT EXISTS idx_attach_entry_id ON entry_attachments(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_attach_sha256 ON entry_attachments(file_sha256);
 
         -- meta
         CREATE TABLE IF NOT EXISTS schema_meta (

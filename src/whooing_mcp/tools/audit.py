@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from whooing_mcp.annotations import attach_annotations
+from whooing_mcp.attachments import attach_attachments
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.dates import days_ago_yyyymmdd, today_yyyymmdd
 from whooing_mcp.models import ToolError
@@ -48,6 +49,7 @@ async def audit_recent_ai_entries(
 
     matched.sort(key=lambda e: e.get("entry_date") or "", reverse=True)
     matched = attach_annotations(matched)  # 로컬 note + hashtags 부착
+    matched = attach_attachments(matched)  # 로컬 첨부파일 부착
 
     return {
         "entries": matched,

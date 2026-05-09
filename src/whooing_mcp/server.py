@@ -27,6 +27,11 @@ from whooing_mcp.tools.annotations import (
     remove_entry_note,
     set_entry_note,
 )
+from whooing_mcp.tools.attachments import (
+    attach_file_to_entry,
+    list_entry_attachments,
+    remove_attachment,
+)
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.delete import delete_entries
@@ -580,6 +585,63 @@ def build_mcp() -> FastMCP:
                 fallback_l_account_id=fallback_l_account_id,
                 dry_run=dry_run,
                 confirm_insert=confirm_insert,
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "거래 ID 에 PDF 등 파일을 첨부합니다 (후잉이 entry-attachment 미지원이라 "
+            "본 wrapper 가 별개 SQLite layer 에 보관). 기본 동작: 파일을 "
+            "attachments/files/YYYY/YYYY-MM-DD/ 로 복사 + sha256 dedup. 한 거래에 "
+            "여러 파일 가능. 후잉 ledger 자체는 변경 X."
+        )
+    )
+    async def whooing_attach_file_to_entry(
+        entry_id: str,
+        file_path: str,
+        section_id: str | None = None,
+        note: str | None = None,
+        attach_date: str | None = None,
+        copy: bool = True,
+    ) -> dict:
+        try:
+            return await attach_file_to_entry(
+                entry_id=entry_id, file_path=file_path,
+                section_id=section_id, note=note,
+                attach_date=attach_date, copy=copy,
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "한 개 또는 여러 entry_id 의 첨부파일 목록 조회. 결과: "
+            "{attachments_by_entry: {eid: [{id, file_path, original_filename, "
+            "size_bytes, mime_type, note, attached_at}, ...]}}."
+        )
+    )
+    async def whooing_list_entry_attachments(
+        entry_ids: str | list[str],
+    ) -> dict:
+        try:
+            return await list_entry_attachments(entry_ids)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "첨부파일 row 삭제. delete_file=True (기본) 면 디스크 파일도 제거 — 단 "
+            "같은 sha256 의 다른 row 가 남아있으면 파일 자체는 보존 (다른 entry 가 참조)."
+        )
+    )
+    async def whooing_remove_attachment(
+        attachment_id: int,
+        delete_file: bool = True,
+    ) -> dict:
+        try:
+            return await remove_attachment(
+                attachment_id=attachment_id, delete_file=delete_file
             )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}

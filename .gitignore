@@ -20,6 +20,10 @@ venv/
 whooing-mcp.toml
 !whooing-mcp.toml.example
 
+# 거래 첨부파일 (개인 금융 supporting docs — GitHub 절대 X).
+# P4 에는 정책상 들어감 (cross-machine).
+attachments/
+
 # SQLite db (queue + annotations) — P4 에는 sync, GitHub 에는 절대 X
 # (사용자 정책 2026-05-09: cross-machine via P4 만)
 queue.db

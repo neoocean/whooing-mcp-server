@@ -7,8 +7,40 @@
 
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
-* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (현재 v0.1.8 한계).
+* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (현재 v0.1.9 한계).
 * OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
+
+## v0.1.9 — 2026-05-09
+
+거래 ↔ 첨부파일 1:N layer.
+
+### Added (도구 3종 — 21 → 24)
+
+* `whooing_attach_file_to_entry(entry_id, file_path, note?, attach_date?, copy=True)`
+  파일을 거래에 첨부. 기본 동작: `attachments/files/YYYY/YYYY-MM-DD/` 로 복사
+  + sha256 dedup (같은 내용 한 번만 디스크에). copy=False 면 원본 path 그대로 db 만 기록.
+* `whooing_list_entry_attachments(entry_ids)` — 한 개 또는 여러 entry 의 첨부파일 조회.
+* `whooing_remove_attachment(attachment_id, delete_file=True)` — row + (옵션) 디스크 파일 제거.
+  같은 sha256 의 다른 row 가 남아있으면 파일은 보존.
+
+### Added (인프라)
+
+* `src/whooing_mcp/attachments.py` — storage layer (copy + sha256 dedup +
+  CRUD + `attach_attachments(entries)` augmentation helper).
+* SQLite schema v3 → v4: `entry_attachments` 테이블.
+* `audit` + `find_entries_by_hashtag` 출력에 `local_attachments` 필드 자동 부착
+  (`local_annotations` 와 같은 패턴).
+* `.gitignore`: `attachments/` 차단 (개인 금융 supporting docs — GitHub 절대 X,
+  P4 정책상 sync).
+
+### Why
+후잉이 거래 항목에 PDF 등 파일 업로드 미지원. 카드 인보이스 같은 supporting
+doc 을 거래에 연결하려는 사용자 요청 (2026-05-09). 파일은 로컬 디스크 +
+SQLite 메타로 보관, 후잉 ledger 자체는 변경 X.
+
+### First use
+* Atlassian Invoice IN-006-462-370 (USD 14.52, 2026-04-29) → entry_id 1710716
+  (ATLASSIAN, 22383원, 2026-03-29) 에 첨부 (별도 단계).
 
 ## v0.1.8 — 2026-05-09
 

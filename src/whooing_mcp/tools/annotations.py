@@ -16,6 +16,7 @@ from whooing_mcp.annotations import (
     parse_hashtag_input,
     upsert_annotation,
 )
+from whooing_mcp.attachments import attach_attachments
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.dates import days_ago_yyyymmdd, today_yyyymmdd
 from whooing_mcp.models import ToolError
@@ -186,6 +187,7 @@ async def find_entries_by_hashtag(
     missing_in_remote = sorted(matched_ids - fetched_ids)
 
     enriched = attach_annotations(matched_entries)
+    enriched = attach_attachments(enriched)  # 첨부파일도 부착
     enriched.sort(key=lambda e: e.get("entry_date") or "", reverse=True)
 
     return {
