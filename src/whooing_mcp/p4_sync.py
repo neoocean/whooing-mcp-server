@@ -86,21 +86,35 @@ def sync_db_to_p4(action_summary: str) -> dict:
             ),
         }
 
-    # 변경 감지: `p4 diff -ds` 가 'no changes' 면 그대로
+    # 변경 감지: p4 reconcile -n (preview, not opened — DESIGN §13.2 정책 검증)
+    # p4 diff 는 _opened_ 파일만 비교하므로 db 가 아직 안 열렸을 땐 항상 빈 출력.
+    # reconcile -n 은 closed 파일도 depot digest 와 비교해 변경 감지.
     try:
-        diff = subprocess.run(
-            ["p4", "diff", "-ds", str(db_path)],
+        recon = subprocess.run(
+            ["p4", "reconcile", "-n", str(db_path)],
             capture_output=True, text=True, timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        return {"ok": False, "skipped": False, "message": f"p4 diff 실패: {e}"}
+        return {"ok": False, "skipped": False, "message": f"p4 reconcile 실패: {e}"}
 
-    # diff -ds 출력이 비어있거나 "no changes" 패턴이면 sync 불필요
-    if not diff.stdout.strip() or "no changes" in diff.stdout.lower():
+    # reconcile -n 출력 패턴 (p4 버전마다 약간 다름):
+    #   변경됨: "... - opened for edit" / "reconcile to edit"
+    #   추가됨: "... - opened for add"   / "reconcile to add"
+    #   삭제됨: "... - opened for delete" / "reconcile to delete"
+    #   변경 없음: "...no file(s) to reconcile" 또는 빈 출력
+    combined = (recon.stdout + recon.stderr).lower()
+    has_change = any(
+        marker in combined
+        for marker in (
+            "opened for edit", "opened for add", "opened for delete",
+            "reconcile to edit", "reconcile to add", "reconcile to delete",
+        )
+    )
+    if not has_change:
         return {"ok": True, "skipped": True, "message": "db 변경 없음"}
 
     # 별도 numbered CL 생성
-    desc = _build_description(action_summary, diff.stdout)
+    desc = _build_description(action_summary, recon.stdout)
     try:
         change_form = (
             "Change: new\n"

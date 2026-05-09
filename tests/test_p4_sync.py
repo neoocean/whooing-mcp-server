@@ -89,7 +89,7 @@ def test_skip_when_db_not_in_depot(tmp_db_in_path, monkeypatch):
 def test_skip_when_no_changes(tmp_db_in_path, monkeypatch):
     monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
     monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
-    # p4 diff -ds → 빈 출력 = no changes
+    # p4 reconcile -n → 빈 출력 (또는 'no file(s) to reconcile') = no changes
     _mock_subprocess(monkeypatch, [(0, "", "")])
     out = p4_sync.sync_db_to_p4("test")
     assert out["skipped"] is True
@@ -97,14 +97,14 @@ def test_skip_when_no_changes(tmp_db_in_path, monkeypatch):
 
 
 def test_full_sync_flow(tmp_db_in_path, monkeypatch):
-    """diff → change -i → edit -c → submit -c 모두 성공."""
+    """reconcile -n (변경 감지) → change -i → edit -c → submit -c 모두 성공."""
     monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
     monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
     _mock_subprocess(monkeypatch, [
-        (0, "diff: 5 chunks 100 lines changed", ""),  # p4 diff -ds
-        (0, "Change 99999 created.", ""),              # p4 change -i
-        (0, "opened for edit", ""),                    # p4 edit -c
-        (0, "Change 99999 submitted.", ""),            # p4 submit -c
+        (0, "//.../whooing-data.sqlite#1 - opened for edit", ""),  # reconcile -n
+        (0, "Change 99999 created.", ""),                           # p4 change -i
+        (0, "opened for edit", ""),                                 # p4 edit -c
+        (0, "Change 99999 submitted.", ""),                         # p4 submit -c
     ])
     out = p4_sync.sync_db_to_p4("test action")
     assert out["ok"] is True
@@ -117,7 +117,7 @@ def test_sync_handles_renamed_cl(tmp_db_in_path, monkeypatch):
     monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
     monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
     _mock_subprocess(monkeypatch, [
-        (0, "diff change", ""),
+        (0, "//.../foo.sqlite - opened for edit", ""),
         (0, "Change 100 created.", ""),
         (0, "edited", ""),
         (0, "Change 100 renamed change 105 and submitted.", ""),
@@ -130,12 +130,27 @@ def test_sync_returns_failure_on_change_create_error(tmp_db_in_path, monkeypatch
     monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
     monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
     _mock_subprocess(monkeypatch, [
-        (0, "diff", ""),
+        (0, "//.../db.sqlite - opened for edit", ""),
         (1, "", "Permission denied"),  # p4 change -i fails
     ])
     out = p4_sync.sync_db_to_p4("test")
     assert out["ok"] is False
     assert "Permission denied" in out["message"]
+
+
+def test_reconcile_to_edit_pattern_also_recognized(tmp_db_in_path, monkeypatch):
+    """일부 P4 버전은 'reconcile to edit' 형식으로 출력 — 같이 매칭."""
+    monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
+    monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
+    _mock_subprocess(monkeypatch, [
+        (0, "//foo - reconcile to edit", ""),
+        (0, "Change 200 created.", ""),
+        (0, "ok", ""),
+        (0, "Change 200 submitted.", ""),
+    ])
+    out = p4_sync.sync_db_to_p4("variant test")
+    assert out["ok"] is True
+    assert out["cl"] == 200
 
 
 # ---- _build_description -----------------------------------------------
