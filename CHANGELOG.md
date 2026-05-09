@@ -8,6 +8,21 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## v0.1.6 — 2026-05-09 (docs)
+
+### Documentation
+
+* README 의 첫 페이지 아키텍처 다이어그램을 ASCII → Mermaid flowchart 로
+  교체. 한글 폭 차이로 깨져 보이던 정렬 문제 해결.
+* DESIGN.md §6.7 의 역방향 조회 흐름 다이어그램 → Mermaid sequenceDiagram.
+* README 도구 표 5 → 18 업데이트, annotation 5 도구 + PDF 2 도구 + monthly_close
+  명시. 워크플로우 시나리오 4번째 (메모/태그) 추가. 도구 reference
+  섹션에 5 도구 상세 명세.
+* DESIGN.md §6.7 신규 (Local entry annotations 5 도구 명세). §10 캐싱
+  표에 영구 저장 layer 추가. §14 향후확장 표를 현재 상태로 갱신
+  (annotation/queue/category/monthly_close ✅ 완료 표시).
+* CHANGELOG 의 v0.1.4 entry 의 도구 목록 명확화.
+
 ## v0.1.5 — 2026-05-09
 
 SQLite db 정책 정착.

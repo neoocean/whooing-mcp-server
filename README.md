@@ -5,28 +5,15 @@ Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MC
 (`https://whooing.com/mcp`) 와 함께 등록해 사용하는 **보완(wrapper) MCP
 서버** 입니다.
 
-```
-            ┌──────────────────────────────────────┐
-            │  Claude (Desktop / Code / mcp host)  │
-            └─────────────┬──────────────┬─────────┘
-                          │              │
-                  (stdio) │              │ (HTTP, mcp-remote)
-                          ▼              ▼
-            ┌──────────────────┐  ┌──────────────────────┐
-            │ whooing-extras   │  │ whooing (공식)       │
-            │ (본 프로젝트)    │  │ whooing.com/mcp      │
-            │                  │  │                      │
-            │ • SMS parser     │  │ • 거래 CRUD          │
-            │ • dedup          │  │ • 보고서 / P&L       │
-            │ • audit          │  │ • 예산 / 장기목표    │
-            │ • CSV reconcile  │  │ • 매월입력 / 빈번    │
-            │ • CSV detect     │  │ • 포스트잇 / BBS     │
-            └────────┬─────────┘  └──────────┬───────────┘
-                     │                       │
-                     └────────► 같은 AI 토큰 ◄────────
-                                     │
-                                     ▼
-                             후잉 REST API
+```mermaid
+flowchart TB
+    Claude["Claude<br/>(Desktop / Code / mcp host)"]
+
+    Claude -- "stdio (Python)" --> Wrapper["<b>whooing-extras</b><br/>(본 프로젝트)<br/>• SMS / PDF / CSV 파서<br/>• audit / dedup / category<br/>• 로컬 큐 + 메모/해시태그<br/>• monthly_close"]
+    Claude -- "HTTP via mcp-remote" --> Official["<b>whooing</b> (공식)<br/>whooing.com/mcp<br/>• 거래 CRUD<br/>• 보고서 / P&L<br/>• 예산 / 장기목표<br/>• 매월·빈번입력<br/>• 포스트잇 / BBS"]
+
+    Wrapper -- "AI 토큰" --> API["후잉 REST API"]
+    Official -- "AI 토큰" --> API
 ```
 
 > **두 MCP 모두 등록하는 게 정상 사용법입니다.** 공식 MCP 가 거래 입력/수정/
@@ -37,7 +24,7 @@ Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MC
 
 ## 목차
 
-- [v0.1 wrapper 도구 5개](#v01-wrapper-도구-5개)
+- [wrapper 도구 18개](#wrapper-도구-18개)
 - [Quickstart (5분)](#quickstart-5분)
   - [1. AI 연동 토큰 발급](#1-ai-연동-토큰-발급)
   - [2. 공식 후잉 MCP 등록](#2-공식-후잉-mcp-등록)
@@ -48,29 +35,32 @@ Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MC
   - [매일: SMS 알림 → 입력](#매일-sms-알림--입력)
   - [주간: audit + dedup](#주간-audit--dedup)
   - [매월: 카드명세서 reconcile](#매월-카드명세서-reconcile)
+  - [거래에 메모·해시태그 달기 + 태그로 역조회](#거래에-메모해시태그-달기--태그로-역조회)
 - [트러블슈팅](#트러블슈팅)
 - [개발](#개발)
 - [참고 / 라이선스](#참고--라이선스)
 
 ---
 
-## wrapper 도구 10개
+## wrapper 도구 18개
 
-### 후잉 read-only 도구 (5)
+### 후잉 read-only 도구 (7)
 
 | 도구 | 한 줄 설명 | API |
 |---|---|---|
-| `whooing_audit_recent_ai_entries` | 최근 N일 거래 중 LLM 이 입력한 것만 (memo 마커 기준) | GET /entries |
+| `whooing_audit_recent_ai_entries` | 최근 N일 거래 중 LLM 이 입력한 것만 (memo 마커 기준) — **로컬 메모/태그 자동 부착** | GET /entries |
 | `whooing_find_duplicates` | 같은 금액 + 유사 item + ±N일 거래쌍을 중복 후보로 | GET /entries |
 | `whooing_reconcile_csv` | 카드사 명세서 CSV ↔ 후잉 entries 매칭, 누락/잉여 보고 | GET /entries |
+| `whooing_reconcile_pdf` | 카드사 명세서 PDF ↔ 후잉 entries 매칭 | GET /entries |
 | `whooing_csv_format_detect` | CSV 헤더 기반 카드사 자동 탐지 (디버깅) | (없음) |
+| `whooing_pdf_format_detect` | PDF 첫 페이지 기반 카드사 탐지 (디버깅) | (없음) |
 | `whooing_suggest_category` | 과거 거래 학습 → 새 가맹점의 l_account 추천 | GET /entries |
 
 ### 외부 텍스트 → 후잉 형식 변환 (1)
 
 | 도구 | 한 줄 설명 | API |
 |---|---|---|
-| `whooing_parse_payment_sms` | SMS / Push 결제 알림 텍스트 → 후잉 항목 dict | (없음) |
+| `whooing_parse_payment_sms` | SMS / Push 결제 알림 텍스트 → 후잉 항목 dict (지원: 신한/국민/현대/삼성/토스/카카오뱅크/우리) | (없음) |
 
 ### 로컬 임시 큐 (4) — 후잉 자체 자동입력 큐와 별개
 
@@ -81,11 +71,26 @@ Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MC
 | `whooing_confirm_pending` | 후잉에 입력 완료 → 큐 항목 삭제 | (없음) |
 | `whooing_dismiss_pending` | 입력 안 함 → 큐 항목 삭제 (의미 구분) | (없음) |
 
-큐 db 위치: `$WHOOING_QUEUE_PATH` 또는 `~/.local/share/whooing-mcp/queue.db` (default).
+### 로컬 메모 + 해시태그 (5) — 후잉 자체 memo 보완
 
-**모두 read-only / 후잉 직접 입력 X.** 후잉 가계부에 거래 입력/수정/삭제는 LLM
-이 사용자 확인 후 **공식 MCP** 의 `add_entry` / `update_entry` / `delete_entry`
-로 처리합니다.
+후잉 자체 `memo` 가 한 줄짜리 + 해시태그 검색이 부족한 부분을 로컬에서 보완.
+거래 ID 별로 자유 길이의 `note` 와 다중 `hashtags` 를 보관하고, 거래 조회
+시 자동 부착 + 해시태그로 역방향 조회.
+
+| 도구 | 한 줄 설명 | API |
+|---|---|---|
+| `whooing_set_entry_note` | 거래 ID 에 로컬 메모/해시태그 저장 (note + hashtags) | (없음) |
+| `whooing_get_entry_annotations` | 한 개 또는 여러 entry_id 의 로컬 메모/태그 조회 | (없음) |
+| `whooing_remove_entry_note` | 특정 거래의 로컬 메모/태그 삭제 | (없음) |
+| `whooing_list_hashtags` | 모든 unique 해시태그 + 사용 횟수 (prefix 필터) | (없음) |
+| `whooing_find_entries_by_hashtag` | **역방향:** 해시태그 → 후잉 거래 fetch + 메모/태그 부착 | GET /entries |
+
+저장 위치: 본 프로젝트의 `whooing-data.sqlite` (또는 `$WHOOING_QUEUE_PATH`
+override). 후잉 서버의 `memo` 필드는 **변경하지 않음** — 별개의 로컬 레이어.
+
+**위 18개 도구 모두 후잉에 직접 입력 X.** 후잉 가계부에 거래 입력/수정/삭제는
+LLM 이 사용자 확인 후 **공식 MCP** 의 `add_entry` / `update_entry` /
+`delete_entry` 로 처리합니다.
 
 ---
 
@@ -331,6 +336,90 @@ CSV 헤더만 보고 카드사 추측 (디버깅용).
 
 `reconcile_csv` 가 `issuer=auto` 로 매칭 실패할 때 사용.
 
+### `whooing_set_entry_note` / `whooing_get_entry_annotations` / `whooing_remove_entry_note`
+
+후잉 거래 ID 별 **로컬 메모 + 해시태그** 저장. 후잉 자체 `memo` 필드는
+한 줄짜리 + 해시태그 검색 부재라 본 도구로 보완. 본 wrapper 의 로컬 SQLite
+에만 저장 — 후잉 서버의 거래 자체는 변경 X.
+
+```
+set_entry_note 입력: entry_id, note?, hashtags?, section_id?
+                     (note 또는 hashtags 중 최소 하나)
+              출력: { annotation: {entry_id, note, hashtags, ...} }
+
+get_entry_annotations 입력: entry_ids (str | list[str])
+                      출력: { annotations: { entry_id: {note, hashtags, ...} },
+                              found_count, queried_count }
+
+remove_entry_note 입력: entry_id
+                  출력: { removed: bool }
+```
+
+**해시태그 입력 형식 (양쪽 다 허용):**
+- list: `["식비", "#출장", "work-trip"]`
+- 문자열: `"#식비 #출장 work-trip"` (공백/콤마로 분리)
+
+자동 정규화: `#` 제거, 양옆 공백 strip, 빈 토큰 무시. 내부 공백 있는 list
+요소는 reject.
+
+자연어:
+> "이 거래 (entry_id=e_real_42) 에 '#출장 #식비' 태그 달아줘"
+> "이번 출장에서 쓴 거 메모로 '서울 → 부산' 적어줘"
+
+### `whooing_list_hashtags`
+
+저장된 모든 unique 해시태그와 사용 횟수.
+
+```
+입력: prefix? (optional, 시작 매칭 필터)
+출력: { hashtags: [{tag, count}], total_unique, prefix_filter }
+```
+
+자연어:
+> "내가 쓰는 해시태그 다 보여줘"
+> "'work' 로 시작하는 태그 모음"
+
+### `whooing_find_entries_by_hashtag` (역방향 조회)
+
+해시태그 → 매칭 entry_id 들 → **후잉에서 fetch** → 메모/태그 자동 부착.
+
+```
+입력: hashtag, section_id?, lookback_days=365
+출력: { entries: [...with local_annotations attached...], total,
+        hashtag_searched, missing_in_remote_count, missing_in_remote_ids }
+```
+
+`missing_in_remote_ids`: 로컬엔 태그가 있지만 lookback 안 후잉에 안 보이는
+entry_id (삭제됐거나 범위 밖). lookback_days 늘리거나 `whooing_remove_entry_note`
+로 stale annotation 정리.
+
+자연어:
+> "'#출장' 태그 붙은 거래 다 보여줘"
+> "지난 1년 동안 '#식비' 로 분류한 거 모아봐"
+
+### `local_annotations` 자동 부착
+
+`whooing_audit_recent_ai_entries` / `whooing_find_entries_by_hashtag` 의
+응답에 각 entry 별 `local_annotations` 필드가 자동 추가됩니다:
+
+```python
+{
+  "entry_id": "e_real_42",
+  "entry_date": "20260509",
+  "money": 6200,
+  "item": "스타벅스",
+  "memo": "[ai] 음성 위임",
+  "local_annotations": {              # ← 본 wrapper 가 추가
+    "note": "서울 출장 첫 날",
+    "hashtags": ["출장", "서울", "식비"]
+  }
+}
+```
+
+로컬 데이터 없는 entry 는 `local_annotations: null`. (find_duplicates,
+reconcile, monthly_close 등은 응답 크기 제어 위해 자동 부착 안 함 — 필요
+시 LLM 이 별도 `whooing_get_entry_annotations` 호출.)
+
 ---
 
 ## `[ai]` 마커 컨벤션 — 중요
@@ -410,6 +499,35 @@ memo 필드 첫 단어를 '[ai]' 로 시작해줘. 예:
 > 찾아줘"
 
 → Claude 가 `whooing_audit_recent_ai_entries(days=7)` + `whooing_find_duplicates(start_date=일주일전, end_date=오늘)` 호출. 결과를 사용자에게 보여주고, 중복 후보가 있으면 "이 쌍 중 어느 걸 지울까?" 질문.
+
+### 거래에 메모·해시태그 달기 + 태그로 역조회
+
+후잉 자체 memo 가 부족할 때:
+
+1. 후잉에 거래 입력 (공식 MCP `add_entry`) — entry_id 받음
+2. Claude 에:
+   > "방금 입력한 거래 (entry_id=e_real_42) 에 메모 '서울 출장 첫 날' 달고
+   > 태그 #출장 #서울 #식비 붙여줘"
+3. Claude 가 `whooing_set_entry_note(entry_id='e_real_42', note='서울 출장
+   첫 날', hashtags=['출장', '서울', '식비'])` 호출
+4. 응답: 저장된 annotation dict
+
+나중에 (예: 출장비 정산):
+> "지난 5월 출장 관련 거래 모아봐"
+
+→ Claude 가 `whooing_find_entries_by_hashtag(hashtag='출장')` 호출 →
+N건의 후잉 거래 + 각 거래의 로컬 메모/태그 함께 반환 → 합계·기간 등 분석.
+
+또는 audit 결과에서:
+> "지난 주 LLM 입력 거래 보여줘"
+
+→ `whooing_audit_recent_ai_entries(days=7)` → 각 entry 의 `local_annotations`
+필드에 메모/태그 자동 부착되어 표시.
+
+태그 통계:
+> "내가 자주 쓰는 태그 top 10 보여줘"
+
+→ `whooing_list_hashtags()` → count 내림차순.
 
 ### 매월: 카드명세서 reconcile
 
