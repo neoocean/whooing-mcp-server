@@ -86,12 +86,32 @@ def _build_client() -> tuple[WhooingClient, str | None]:
             "후잉 → 사용자 > 계정 > 비밀번호 및 보안 > AI 토큰 발급 후 "
             ".env 또는 환경변수에 WHOOING_AI_TOKEN=__eyJh... 설정하세요."
         )
+
+    # Sanity check (DESIGN §13). 잘못된 토큰을 미리 잡아 401 시간 절약.
+    # 형식이 바뀔 가능성이 있어 fail 은 X — 경고만.
+    if not token.startswith("__"):
+        log.warning(
+            "WHOOING_AI_TOKEN prefix 가 '__' 가 아님 (%r). 후잉 AI 토큰은 "
+            "보통 '__eyJh...' 로 시작합니다. .env 의 토큰 값 재확인 권장.",
+            token[:4],
+        )
+    if len(token) < 50:
+        log.warning(
+            "WHOOING_AI_TOKEN 길이 (%d) 가 비정상적으로 짧음. 후잉 토큰은 "
+            "보통 100자 이상. 잘림/오타 가능성 — .env 재확인 권장.",
+            len(token),
+        )
+
     base = os.getenv("WHOOING_BASE_URL", "https://whooing.com/api")
     timeout = float(os.getenv("WHOOING_HTTP_TIMEOUT", "10"))
+    rpm_cap = int(os.getenv("WHOOING_RPM_CAP", "20"))
     auth = WhooingAuth(token=token)
-    log.info("client built (auth=%r base=%s timeout=%.1f)", auth, base, timeout)
+    log.info(
+        "client built (auth=%r base=%s timeout=%.1f rpm_cap=%d)",
+        auth, base, timeout, rpm_cap,
+    )
     section_id = (os.getenv("WHOOING_SECTION_ID") or "").strip() or None
-    return WhooingClient(auth=auth, base_url=base, timeout=timeout), section_id
+    return WhooingClient(auth=auth, base_url=base, timeout=timeout, rpm_cap=rpm_cap), section_id
 
 
 # ---- 모듈 전역 (FastMCP 데코레이터에서 접근) --------------------------------

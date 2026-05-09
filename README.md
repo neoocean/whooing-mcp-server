@@ -442,6 +442,10 @@ memo 필드 첫 단어를 '[ai]' 로 시작해줘. 예:
 | `whooing_parse_payment_sms` 가 매칭 실패 | 지원 issuer 외 (`supported_issuers` 응답 확인). 새 패턴은 `parsers/sms/<issuer>.py` 추가 |
 | `whooing_reconcile_csv: 'CSV format not detected'` | header 키워드가 알려진 패턴과 다름. `whooing_csv_format_detect` 호출해 header_sample 확인 후 adapter 보강 |
 | Claude Desktop 에서 `whooing-extras` 가 안 보임 | config 의 `command` 가 venv 의 `python` 절대경로인지 확인 (전역 python 으로는 import 실패) |
+| `WHOOING_AI_TOKEN prefix 가 '__' 가 아님` 경고 | sanity check (`server.py` bootstrap). 실제 후잉 토큰은 `__eyJh...` 시작. .env 의 토큰 값이 잘못 들어갔을 가능성 — 후잉에서 재발급한 값을 그대로 (앞 underscore 2개 포함) 복사 |
+| `WHOOING_AI_TOKEN 길이 (X) 가 비정상적으로 짧음` 경고 | 같은 sanity check. 보통 100자 이상. 잘림 가능성 |
+| 도구 호출이 자주 멈춤 (sleep) | client-side rate limit (분당 20 cap). DEBUG 로그에서 "rate-limit throttle" 확인. `WHOOING_RPM_CAP` env 로 조절 가능하나 서버 측 한도 (분당 20, 일 20,000) 가 진짜 제약 |
+| 디버그 로그에 `webhook_token` 값이 보임 | 본 서버는 `errors.sanitize_for_log()` 로 마스크. 직접 응답 dump 코드를 쓰셨다면 같은 헬퍼 적용 |
 | `claude mcp add ... python -m whooing_mcp` → `error: unknown option '-m'` | `--` 로 자체 옵션과 sub-command 분리 필요. `claude mcp add <name> [options] -- <cmd> [<args>...]` 형식. README §3.4 예시 참조 |
 | 같은 도구 이름이 두 서버에 노출되어 LLM 이 혼동 | 본 wrapper 는 공식과 이름 겹치지 않게 `whooing_*` prefix + `_extras` 같은 변별 미사용. 그래도 헷갈리면 사용자 프롬프트에 "extras 의 X 도구를 써" 명시 |
 
