@@ -18,6 +18,7 @@ from whooing_mcp.attachments import (
     upsert_attachment,
 )
 from whooing_mcp.models import ToolError
+from whooing_mcp.p4_sync import sync_db_to_p4
 from whooing_mcp.queue import open_db
 
 
@@ -98,6 +99,9 @@ async def attach_file_to_entry(
             note=note,
         )
 
+    sync = sync_db_to_p4(
+        f"attachment.attach (entry={entry_id}, file={original_filename})"
+    )
     return {
         "attachment": {
             "id": attachment_row["id"],
@@ -111,10 +115,11 @@ async def attach_file_to_entry(
         },
         "copied": copy,
         "deduped": (rel_path != str(src) and copy and attachment_row.get("file_sha256") == sha256),
+        "p4_sync": sync,
         "note": (
             "후잉 ledger 의 entry 자체는 변경되지 않음. 본 wrapper 의 로컬 SQLite "
-            "+ 디스크에만 보관. cross-machine sync 는 P4 정책에 따라 attachments/ "
-            "디렉터리도 자동 sync (큰 파일 주의)."
+            "+ 디스크에만 보관. db 는 자동 P4 sync 됐고, 첨부파일 자체는 별도 "
+            "수동 `p4 reconcile + submit` 또는 사용자 정기 백업 권장."
         ),
     }
 
@@ -178,6 +183,9 @@ async def remove_attachment(
             f"attachment_id={attachment_id} 가 db 에 없음 (이미 삭제됐거나 잘못된 ID).",
         )
 
+    sync = sync_db_to_p4(
+        f"attachment.remove (id={attachment_id}, entry={deleted['entry_id']})"
+    )
     return {
         "removed": True,
         "deleted_row": {
@@ -189,6 +197,7 @@ async def remove_attachment(
         "file_deleted": deleted.get("file_deleted", False),
         "file_kept_other_refs": deleted.get("file_kept_other_refs", 0),
         "file_delete_error": deleted.get("file_delete_error"),
+        "p4_sync": sync,
         "note": (
             "row 삭제됨. delete_file=True 면 디스크 파일도 제거 (단, 같은 sha256 의 "
             "다른 row 가 남아있으면 파일은 보존). 후잉 ledger 의 entry 자체는 영향 X."
