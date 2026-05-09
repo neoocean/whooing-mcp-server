@@ -10,13 +10,27 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from whooing_mcp.parsers.sms import kookmin_card, shinhan_card
+from whooing_mcp.parsers.sms import (
+    hyundai_card,
+    kakaobank,
+    kookmin_card,
+    samsung_card,
+    shinhan_card,
+    toss,
+    woori_bank,
+)
 from whooing_mcp.parsers.sms.base import ParseResult
 
-# (issuer_id, parse fn) — 순서 = auto-detect 시도 순서
+# (issuer_id, parse fn) — 순서 = auto-detect 시도 순서.
+# 자주 쓰이는 카드사 먼저, 키워드가 약한 (우리/토스) 것은 뒤로.
 _REGISTRY: list[tuple[str, Callable[[str], ParseResult | None]]] = [
     ("shinhan_card", shinhan_card.parse),
     ("kookmin_card", kookmin_card.parse),
+    ("hyundai_card", hyundai_card.parse),
+    ("samsung_card", samsung_card.parse),
+    ("kakaobank", kakaobank.parse),
+    ("toss", toss.parse),
+    ("woori_bank", woori_bank.parse),
 ]
 
 

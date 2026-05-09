@@ -5,8 +5,16 @@
 
 ## Unreleased
 
-* 다음 마일스톤: P1 SMS issuer 5종 추가, P1 CSV adapter 추가, **PDF 임포트 지원** (신규).
-* 그 다음: P2 `whooing_monthly_close` (audit + dedup + reconcile + suggest_category 합성).
+* P1 CSV adapter 추가 (현대 / 삼성).
+* P1 **PDF 임포트 지원** (신규) — pdfplumber 기반 + `whooing_reconcile_pdf` /
+  `whooing_pdf_format_detect`.
+* P2 `whooing_monthly_close` (audit + dedup + reconcile + suggest_category 합성).
+
+## v0.1.1 — 2026-05-09
+
+* P1 SMS issuer 5종 추가 — `hyundai_card`, `samsung_card`, `toss`, `kakaobank`,
+  `woori_bank`. 기존 신한/국민과 동일 패턴 (CL 50667).
+* `tests/fixtures/sms/<issuer>_*.txt` 합성 샘플 8개 추가.
 
 ## v0.1.0 — 2026-05-09
 

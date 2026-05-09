@@ -108,11 +108,90 @@ async def test_tool_rejects_empty_text():
 
 async def test_tool_rejects_unknown_hint():
     with pytest.raises(ToolError) as ex:
-        await parse_payment_sms("anything", issuer_hint="hyundai_card")
+        await parse_payment_sms("anything", issuer_hint="lotte_card")  # 미지원 issuer
     assert ex.value.kind == "USER_INPUT"
-    assert "hyundai_card" in str(ex.value)
+    assert "lotte_card" in str(ex.value)
 
 
 def test_known_issuers_listed():
-    assert "shinhan_card" in sms_parsers.known_issuers()
-    assert "kookmin_card" in sms_parsers.known_issuers()
+    issuers = sms_parsers.known_issuers()
+    for expected in (
+        "shinhan_card", "kookmin_card",
+        "hyundai_card", "samsung_card",
+        "kakaobank", "toss", "woori_bank",
+    ):
+        assert expected in issuers, f"missing issuer: {expected}"
+
+
+# ---- 신규 issuer 회귀 (CL #11) ------------------------------------------
+
+
+def test_hyundai_web_multiline():
+    r = sms_parsers.parse(_read("hyundai_web_multiline.txt"))
+    assert r is not None
+    assert r.parser_used == "hyundai_card.v1"
+    assert r.proposed_entry["money"] == 6200
+    assert r.proposed_entry["suggested_r_account"] == "현대카드"
+    assert r.proposed_entry["entry_date"] == f"{YEAR}0509"
+
+
+def test_hyundai_installment_marked():
+    r = sms_parsers.parse(_read("hyundai_installment.txt"))
+    assert r is not None
+    assert r.proposed_entry["money"] == 240000
+    assert any("할부" in n and "X" not in n for n in r.notes)
+
+
+def test_samsung_standard_strips_누적():
+    r = sms_parsers.parse(_read("samsung_standard.txt"))
+    assert r is not None
+    assert r.parser_used == "samsung_card.v1"
+    assert r.proposed_entry["money"] == 6200
+    assert "1,234,567" not in r.proposed_entry["merchant"]
+
+
+def test_samsung_push_oneline():
+    r = sms_parsers.parse(_read("samsung_push_oneline.txt"))
+    assert r is not None
+    assert r.proposed_entry["money"] == 35000
+    assert "합성식당" in r.proposed_entry["merchant"]
+
+
+def test_toss_oneline():
+    r = sms_parsers.parse(_read("toss_oneline.txt"))
+    assert r is not None
+    assert r.parser_used == "toss.v1"
+    assert r.proposed_entry["money"] == 6200
+    assert r.proposed_entry["suggested_r_account"] == "토스"
+
+
+def test_tosscard_approve():
+    r = sms_parsers.parse(_read("tosscard_approve.txt"))
+    assert r is not None
+    assert r.parser_used == "toss.v1"
+    assert r.proposed_entry["money"] == 12500
+
+
+def test_kakaobank_standard():
+    r = sms_parsers.parse(_read("kakaobank_standard.txt"))
+    assert r is not None
+    assert r.parser_used == "kakaobank.v1"
+    assert r.proposed_entry["money"] == 6200
+    assert r.proposed_entry["suggested_r_account"] == "카카오뱅크"
+    # 잔액 잡음 제거
+    assert "1,234,567" not in r.proposed_entry["merchant"]
+
+
+def test_woori_check_card():
+    r = sms_parsers.parse(_read("woori_check.txt"))
+    assert r is not None
+    assert r.parser_used == "woori_bank.v1"
+    assert r.proposed_entry["money"] == 6200
+    assert r.proposed_entry["suggested_r_account"] == "우리은행"
+
+
+def test_explicit_hint_for_new_issuers():
+    """힌트 명시 시 다른 issuer 텍스트는 None."""
+    text = _read("hyundai_web_multiline.txt")
+    assert sms_parsers.parse(text, issuer_hint="samsung_card") is None
+    assert sms_parsers.parse(text, issuer_hint="hyundai_card") is not None
