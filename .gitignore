@@ -16,10 +16,18 @@ venv/
 .env.*
 !.env.example
 
-# Pending queue (per-machine SQLite — not for git mirror)
+# SQLite db (queue + annotations) — P4 에는 sync, GitHub 에는 절대 X
+# (사용자 정책 2026-05-09: cross-machine via P4 만)
 queue.db
+whooing-data.sqlite
+whooing-data.sqlite-journal
+whooing-data.sqlite-wal
+whooing-data.sqlite-shm
 *.sqlite
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
 
 # OS
 .DS_Store

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from whooing_mcp.models import ToolError
+from whooing_mcp.p4_sync import sync_db_to_p4
 from whooing_mcp.queue import count, delete, insert, list_items, open_db
 
 
@@ -52,6 +53,9 @@ async def enqueue_pending(
         "큐에 저장됨. whooing_list_pending 으로 조회, 처리 후 "
         "whooing_confirm_pending(pending_id) 또는 무시 시 "
         "whooing_dismiss_pending(pending_id)."
+    )
+    result["p4_sync"] = sync_db_to_p4(
+        f"queue.enqueue (id={result['pending_id']}, source={source})"
     )
     return result
 
@@ -104,6 +108,7 @@ async def confirm_pending(
             f"pending_id={pending_id} 가 큐에 없습니다 (이미 삭제됐거나 잘못된 ID).",
         )
 
+    sync = sync_db_to_p4(f"queue.confirm (id={pending_id})")
     return {
         "removed": True,
         "deleted_item": deleted,
@@ -115,6 +120,7 @@ async def confirm_pending(
             "입력이 됐는지는 별도로 공식 MCP 의 add_entry 호출이 성공했음을 "
             "LLM 이 확인해야 합니다."
         ),
+        "p4_sync": sync,
     }
 
 
@@ -136,10 +142,12 @@ async def dismiss_pending(
             f"pending_id={pending_id} 가 큐에 없습니다.",
         )
 
+    sync = sync_db_to_p4(f"queue.dismiss (id={pending_id})")
     return {
         "removed": True,
         "deleted_item": deleted,
         "remaining_in_queue": remaining,
         "outcome": "dismissed",
         "reason": reason,
+        "p4_sync": sync,
     }

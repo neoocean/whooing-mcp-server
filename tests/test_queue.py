@@ -40,10 +40,15 @@ def test_default_queue_path_uses_env(monkeypatch, tmp_path):
     assert default_queue_path() == tmp_path / "custom.db"
 
 
-def test_default_queue_path_xdg_when_no_env(monkeypatch):
+def test_default_queue_path_project_root_when_no_env(monkeypatch):
+    """default 는 <project root>/whooing-data.sqlite — cross-machine via P4."""
     monkeypatch.delenv("WHOOING_QUEUE_PATH", raising=False)
     p = default_queue_path()
-    assert p == Path.home() / ".local" / "share" / "whooing-mcp" / "queue.db"
+    assert p.name == "whooing-data.sqlite"
+    # project root 는 src/whooing_mcp/queue.py 의 parents[2]
+    from whooing_mcp import queue
+    expected_root = Path(queue.__file__).resolve().parents[2]
+    assert p == expected_root / "whooing-data.sqlite"
 
 
 def test_open_db_creates_schema_and_directory(tmp_queue):

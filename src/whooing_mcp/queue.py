@@ -24,10 +24,23 @@ SCHEMA_VERSION = 2
 
 
 def default_queue_path() -> Path:
+    """SQLite db 위치.
+
+    우선순위:
+      1. $WHOOING_QUEUE_PATH (override)
+      2. <project root>/whooing-data.sqlite
+         (cross-machine sync via P4 — DESIGN §13.2 정책)
+
+    이전 (CL 50660) default 였던 ~/.local/share/whooing-mcp/queue.db 는
+    각 머신 격리 — cross-machine sync 안 됨. 사용자가 .env 에서 override
+    하지 않는 한 본 default 가 P4 와 자동 연동됨.
+    """
     explicit = os.getenv("WHOOING_QUEUE_PATH")
     if explicit:
         return Path(explicit).expanduser()
-    return Path.home() / ".local" / "share" / "whooing-mcp" / "queue.db"
+    # __file__ = src/whooing_mcp/queue.py → parents[2] = project root
+    project_root = Path(__file__).resolve().parents[2]
+    return project_root / "whooing-data.sqlite"
 
 
 def _now_iso() -> str:

@@ -19,6 +19,7 @@ from whooing_mcp.annotations import (
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.dates import days_ago_yyyymmdd, today_yyyymmdd
 from whooing_mcp.models import ToolError
+from whooing_mcp.p4_sync import sync_db_to_p4
 from whooing_mcp.queue import open_db
 
 
@@ -55,12 +56,15 @@ async def set_entry_note(
             section_id=section_id,
         )
 
+    tag_summary = ",".join(normalized_tags) if normalized_tags else "(no tags)"
+    sync = sync_db_to_p4(f"annotation.set (entry={entry_id}, tags=[{tag_summary}])")
     return {
         "annotation": result,
         "note": (
             "후잉 거래에 _로컬_ annotation 이 저장되었습니다. 후잉 서버의 memo "
             "는 변경되지 않습니다 — 본 wrapper 의 SQLite 큐에만 저장됩니다."
         ),
+        "p4_sync": sync,
     }
 
 
@@ -107,10 +111,12 @@ async def remove_entry_note(entry_id: str) -> dict[str, Any]:
             "note": "해당 entry_id 에 로컬 annotation 이 없었습니다.",
         }
 
+    sync = sync_db_to_p4(f"annotation.remove (entry={entry_id})")
     return {
         "removed": True,
         "entry_id": entry_id,
         "note": "후잉 서버의 entry 자체는 영향 없음. 로컬 annotation 만 삭제.",
+        "p4_sync": sync,
     }
 
 

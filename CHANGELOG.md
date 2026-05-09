@@ -8,6 +8,33 @@
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
 
+## v0.1.5 — 2026-05-09
+
+SQLite db 정책 정착.
+
+### Changed (Breaking)
+
+* SQLite db default 위치: `~/.local/share/whooing-mcp/queue.db` →
+  `<project root>/whooing-data.sqlite`. cross-machine continuity 를 위해
+  P4 와 자동 연동되는 위치로 이동. `$WHOOING_QUEUE_PATH` override 우선순위는
+  유지.
+
+### Added
+
+* `src/whooing_mcp/p4_sync.py` — db 변경 후 자동 P4 sync.
+  * 새 numbered CL 생성 (default 사용 X)
+  * description 에 무엇이 변경됐는지 (action_summary + p4 diff -ds 요약)
+  * GitHub 으로는 가지 않음 (.gitignore 가 *.sqlite 차단)
+  * 실패는 silent — 도구 응답의 'p4_sync' 필드로 가시화
+* 모든 modifying 도구 (enqueue/confirm/dismiss_pending,
+  set/remove_entry_note) 가 작업 끝에 sync_db_to_p4() 자동 호출.
+* .gitignore 강화 — `whooing-data.sqlite*` + `*.db-journal/wal/shm`
+  명시 차단.
+
+### v0.1.4 — Local entry annotations
+
+(직전 release — git 8f5d400, P4 50678) — 5 도구 + 자동 audit 부착.
+
 ## v0.1.3 — 2026-05-09
 
 P2 월말 정산 합성 도구.
