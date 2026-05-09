@@ -1,4 +1,8 @@
-# whooing-mcp-server 설계 문서 (v2)
+# whooing-mcp-server-wrapper 설계 문서 (v2)
+
+> 외부 노출명은 `whooing-mcp-server-wrapper` (GitHub repo + PyPI dist name).
+> 본 워크스페이스의 Perforce 경로 (`//woojinkim/scripts/whooing-mcp-server/...`)
+> 와 Python import path (`whooing_mcp`) 는 호환성을 위해 변경하지 않음.
 
 이 문서는 [whooing.com](https://whooing.com) (이하 **후잉**) 가계부의 **공식
 MCP 서버**(`https://whooing.com/mcp`) 위에서 동작하는 **보완 도구 묶음**의
@@ -177,7 +181,7 @@ X-API-Key: __eyJh...
 ### §5.2 모듈 분할
 
 ```
-whooing-mcp-server/
+whooing-mcp-server-wrapper/
 ├── DESIGN.md                ← 본 문서
 ├── README.md                ← 사용자 quickstart (공식 MCP 등록 + 우리 등록)
 ├── pyproject.toml

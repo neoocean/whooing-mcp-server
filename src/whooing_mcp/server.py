@@ -132,7 +132,10 @@ async def _ensure_client_and_section(override: str | None) -> tuple[WhooingClien
 
 
 def build_mcp() -> FastMCP:
-    mcp = FastMCP("whooing-extras")
+    # MCP server self-name. Claude Desktop config 의 mcpServers 키 와는 별개 —
+    # 사용자는 config 키를 짧게 (예: 'whooing-extras') 유지하는 게 편하지만
+    # 서버 자체의 정체성은 외부 노출명을 따른다.
+    mcp = FastMCP("whooing-mcp-server-wrapper")
 
     @mcp.tool(
         description=(

@@ -12,7 +12,7 @@
 #   {
 #     "mcpServers": {
 #       "whooing": {
-#         "command": "/abs/path/to/whooing-mcp-server/bin/whooing-mcp-remote.sh"
+#         "command": "/abs/path/to/whooing-mcp-server-wrapper/bin/whooing-mcp-remote.sh"
 #       }
 #     }
 #   }
