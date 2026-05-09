@@ -1,0 +1,18 @@
+[
+  {
+    "section_id": "s_FAKE_1",
+    "title": "<test-section-1>",
+    "currency": "KRW",
+    "decimal_places": 0,
+    "date_format": "YMD",
+    "use_ai": "y"
+  },
+  {
+    "section_id": "s_FAKE_2",
+    "title": "<test-section-2>",
+    "currency": "KRW",
+    "decimal_places": 0,
+    "date_format": "YMD",
+    "use_ai": "y"
+  }
+]

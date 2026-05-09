@@ -1,0 +1,25 @@
+{
+  "_comment": "공식 후잉 MCP + 본 wrapper 두 개를 함께 등록. 같은 AI 토큰을 양쪽에 공급.",
+  "mcpServers": {
+    "whooing": {
+      "_comment": "후잉 공식 MCP — 거래 CRUD, 보고서, 예산 등 기본 기능 제공",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://whooing.com/mcp",
+        "--header",
+        "X-API-Key: __eyJh..."
+      ]
+    },
+    "whooing-extras": {
+      "_comment": "본 wrapper — audit / dedup / SMS parser / CSV reconcile",
+      "command": "python",
+      "args": ["-m", "whooing_mcp"],
+      "env": {
+        "WHOOING_AI_TOKEN": "__eyJh...",
+        "WHOOING_SECTION_ID": ""
+      }
+    }
+  }
+}
