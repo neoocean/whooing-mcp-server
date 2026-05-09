@@ -21,6 +21,7 @@ from whooing_mcp.auth import WhooingAuth
 from whooing_mcp.client import WhooingClient
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
+from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.dedup import find_duplicates
 from whooing_mcp.tools.reconcile import csv_format_detect, reconcile_csv
 from whooing_mcp.tools.sms import parse_payment_sms
@@ -234,6 +235,34 @@ def build_mcp() -> FastMCP:
     async def whooing_csv_format_detect(csv_path: str) -> dict:
         try:
             return await csv_format_detect(csv_path)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "사용자의 과거 후잉 거래에서 학습해 새 가맹점의 카테고리(l_account)를 "
+            "추천합니다. SMS / CSV 로 잡힌 신규 거래 입력 직전에 호출 — 결과의 "
+            "suggested[0].l_account 를 사용자에게 확인받고 공식 MCP add_entry 의 "
+            "l_account 인자로 사용하세요. evidence 배열에 매칭된 과거 거래 샘플 포함."
+        )
+    )
+    async def whooing_suggest_category(
+        merchant: str,
+        section_id: str | None = None,
+        lookback_days: int = 180,
+        min_similarity: float = 0.50,
+        top_k: int = 3,
+    ) -> dict:
+        try:
+            client, sid = await _ensure_client_and_section(section_id)
+            return await suggest_category(
+                client,
+                merchant=merchant,
+                section_id=sid,
+                lookback_days=lookback_days,
+                min_similarity=min_similarity,
+                top_k=top_k,
+            )
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 
