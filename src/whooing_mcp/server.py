@@ -23,6 +23,12 @@ from whooing_mcp.models import ToolError
 from whooing_mcp.tools.audit import DEFAULT_MARKER, audit_recent_ai_entries
 from whooing_mcp.tools.category import suggest_category
 from whooing_mcp.tools.dedup import find_duplicates
+from whooing_mcp.tools.pending import (
+    confirm_pending,
+    dismiss_pending,
+    enqueue_pending,
+    list_pending,
+)
 from whooing_mcp.tools.reconcile import csv_format_detect, reconcile_csv
 from whooing_mcp.tools.sms import parse_payment_sms
 
@@ -263,6 +269,78 @@ def build_mcp() -> FastMCP:
                 min_similarity=min_similarity,
                 top_k=top_k,
             )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "SMS / 메일 / 텍스트를 _임시 큐_ 에 저장합니다 (후잉 자체 큐와 별개의 "
+            "로컬 SQLite 큐). 사용자가 거래 입력을 즉시 못하고 나중에 정리할 때 "
+            "사용. parsed dict 가 있으면 같이 저장 (whooing_parse_payment_sms "
+            "결과를 그대로 넘기는 패턴)."
+        )
+    )
+    async def whooing_enqueue_pending(
+        text: str | None = None,
+        parsed: dict | None = None,
+        source: str = "manual",
+        issuer: str | None = None,
+        section_id: str | None = None,
+        note: str | None = None,
+    ) -> dict:
+        try:
+            return await enqueue_pending(
+                text=text, parsed=parsed, source=source,
+                issuer=issuer, section_id=section_id, note=note,
+            )
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "임시 큐의 미정리 항목 조회. source 로 'manual'|'sms'|'email' 필터, "
+            "since 로 ISO8601 시각 이후 필터. 각 item 의 parsed 필드에 SMS 파서 "
+            "결과 dict 가 있어 사용자에게 보여주기 좋다."
+        )
+    )
+    async def whooing_list_pending(
+        source: str | None = None,
+        since: str | None = None,
+        limit: int = 50,
+    ) -> dict:
+        try:
+            return await list_pending(source=source, since=since, limit=limit)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "큐 항목을 후잉에 입력 완료한 뒤 큐에서 제거. 본 도구는 우리 자체 "
+            "큐만 정리하며, 실제 후잉 add_entry 호출은 별도로 공식 MCP 의 "
+            "add_entry 도구로 LLM 이 처리해야 한다."
+        )
+    )
+    async def whooing_confirm_pending(
+        pending_id: int,
+        note: str | None = None,
+    ) -> dict:
+        try:
+            return await confirm_pending(pending_id=pending_id, note=note)
+        except ToolError as e:
+            return {"error": {"kind": e.kind, "message": e.message, **e.details}}
+
+    @mcp.tool(
+        description=(
+            "큐 항목을 _입력하지 않고_ 제거. 'confirm' 과 의미 구분 — 무시/취소/"
+            "중복 같은 사유로 후잉에 안 넣을 항목."
+        )
+    )
+    async def whooing_dismiss_pending(
+        pending_id: int,
+        reason: str | None = None,
+    ) -> dict:
+        try:
+            return await dismiss_pending(pending_id=pending_id, reason=reason)
         except ToolError as e:
             return {"error": {"kind": e.kind, "message": e.message, **e.details}}
 

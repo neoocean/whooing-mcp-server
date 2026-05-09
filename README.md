@@ -53,18 +53,38 @@ Desktop 에서 자연어로 다루기** 위한 도구 묶음. **공식 후잉 MC
 
 ---
 
-## v0.1 wrapper 도구 5개
+## wrapper 도구 10개
 
-| 도구 | 한 줄 설명 | API 호출 |
+### 후잉 read-only 도구 (5)
+
+| 도구 | 한 줄 설명 | API |
 |---|---|---|
 | `whooing_audit_recent_ai_entries` | 최근 N일 거래 중 LLM 이 입력한 것만 (memo 마커 기준) | GET /entries |
 | `whooing_find_duplicates` | 같은 금액 + 유사 item + ±N일 거래쌍을 중복 후보로 | GET /entries |
-| `whooing_parse_payment_sms` | SMS / Push 결제 알림 텍스트 → 후잉 항목 dict | (없음) |
 | `whooing_reconcile_csv` | 카드사 명세서 CSV ↔ 후잉 entries 매칭, 누락/잉여 보고 | GET /entries |
 | `whooing_csv_format_detect` | CSV 헤더 기반 카드사 자동 탐지 (디버깅) | (없음) |
+| `whooing_suggest_category` | 과거 거래 학습 → 새 가맹점의 l_account 추천 | GET /entries |
 
-**모두 read-only.** 입력/수정/삭제는 LLM 이 사용자 확인 후 **공식 MCP** 의
-`add_entry` / `update_entry` / `delete_entry` 로 처리합니다.
+### 외부 텍스트 → 후잉 형식 변환 (1)
+
+| 도구 | 한 줄 설명 | API |
+|---|---|---|
+| `whooing_parse_payment_sms` | SMS / Push 결제 알림 텍스트 → 후잉 항목 dict | (없음) |
+
+### 로컬 임시 큐 (4) — 후잉 자체 자동입력 큐와 별개
+
+| 도구 | 한 줄 설명 | API |
+|---|---|---|
+| `whooing_enqueue_pending` | 텍스트/parsed dict 를 로컬 SQLite 큐에 저장 | (없음) |
+| `whooing_list_pending` | 큐 조회 (source/since 필터) | (없음) |
+| `whooing_confirm_pending` | 후잉에 입력 완료 → 큐 항목 삭제 | (없음) |
+| `whooing_dismiss_pending` | 입력 안 함 → 큐 항목 삭제 (의미 구분) | (없음) |
+
+큐 db 위치: `$WHOOING_QUEUE_PATH` 또는 `~/.local/share/whooing-mcp/queue.db` (default).
+
+**모두 read-only / 후잉 직접 입력 X.** 후잉 가계부에 거래 입력/수정/삭제는 LLM
+이 사용자 확인 후 **공식 MCP** 의 `add_entry` / `update_entry` / `delete_entry`
+로 처리합니다.
 
 ---
 
@@ -336,7 +356,28 @@ memo 필드 첫 단어를 '[ai]' 로 시작해줘. 예:
 
 ## 워크플로우 예시
 
-### 매일: SMS 알림 → 입력
+### SMS 받았는데 지금 처리 못함 (큐에 저장 후 나중에)
+
+1. SMS 도착 → 텍스트 복사
+2. Claude 에:
+   > "이거 지금 처리할 시간 없어. 큐에 넣어두자: [SMS 텍스트]"
+3. Claude 가:
+   - `whooing_parse_payment_sms` 호출 → proposed_entry dict
+   - `whooing_enqueue_pending(parsed=proposed_entry, source='sms', issuer='shinhan_card')` 호출
+4. 응답: `pending_id=42, queue_total=N`
+
+나중에 (예: 점심시간):
+> "오늘 큐에 쌓인 거 다 처리하자"
+
+→ Claude 가 `whooing_list_pending(since=오늘아침)` 호출 → N개 항목 표시 →
+각각:
+  - `whooing_suggest_category(merchant=...)` → 카테고리 후보
+  - 사용자 확인 → 공식 `add_entry(memo='[ai] queue: ...')` → 성공 시
+  - `whooing_confirm_pending(pending_id=...)` → 큐 정리
+
+무시할 항목은 `whooing_dismiss_pending(pending_id, reason='이미 입력됨')`.
+
+### 매일: SMS 알림 → 즉시 입력
 
 1. 카드 결제 → 카드사 SMS 도착
 2. 텍스트 복사
@@ -353,11 +394,13 @@ memo 필드 첫 단어를 '[ai]' 로 시작해줘. 예:
    > "스타벅스강남점에서 6,200원 (신한카드 일시불, 5/9). 외식 카테고리
    > 맞아? 메모는 비워둬도 돼?"
 6. 사용자 "응"
-7. Claude 가 공식 MCP 의 `add_entry` 호출:
+7. Claude 가 (선택) `whooing_suggest_category(merchant="스타벅스강남점")` 호출 →
+   `[{l_account:'외식', confidence:0.9, evidence:[과거 스타벅스 4건 모두 외식]}]`
+8. Claude 가 공식 MCP 의 `add_entry` 호출:
    - section_id, entry_date=20260509, money=6200,
      l_account="외식", r_account="신한카드",
      item="스타벅스강남점", **memo="[ai] SMS 위임"**
-8. 완료 보고
+9. 완료 보고
 
 ### 주간: audit + dedup
 

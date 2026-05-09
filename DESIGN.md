@@ -520,17 +520,19 @@ claude mcp add whooing-extras python -m whooing_mcp --scope user \
 
 ## §14. 향후 확장
 
-| 항목 | 우선순위 |
-|---|---|
-| OAuth2 PKCE 클라이언트 (멀티사용자 / 공개 배포) | P1 |
-| SMS issuer 추가 (현대카드 / 삼성카드 / 토스 / 카카오뱅크 / 우리은행 ...) | P1 (수요 따라) |
-| CSV adapter 추가 (issuer 별) | P1 |
-| 영수증 photo → entry (Vision LLM 보조 도구) | P2 |
-| 자동 카테고리 학습 (사용자의 과거 입력 기반) | P2 |
-| `whooing_monthly_close` (월말 정산 자동 점검) | P2 |
-| HTTP/SSE 트랜스포트 + launchd 데몬화 | P2 |
-| Telegram/email 예산 알람 데몬 | P3 |
-| 후잉 webhook 수신 → MCP outbound notification | P3 |
+| 항목 | 우선순위 | 상태 |
+|---|---|---|
+| OAuth2 PKCE 클라이언트 (멀티사용자 / 공개 배포) | P1 | deferred |
+| SMS issuer 추가 (현대카드 / 삼성카드 / 토스 / 카카오뱅크 / 우리은행 ...) | P1 | 점진 |
+| CSV adapter 추가 (issuer 별) | P1 | 점진 |
+| 영수증 photo → entry (Vision LLM 보조 도구) | P2 | deferred |
+| **자동 카테고리 학습 (사용자의 과거 입력 기반)** | P2 | **✅ 완료 — `whooing_suggest_category` (CL 50658)** |
+| **자동입력 대기열 (로컬 SQLite 큐)** | P2 | **✅ 완료 — `whooing_enqueue/list/confirm/dismiss_pending` (CL 50660)** |
+| `whooing_monthly_close` (월말 정산 자동 점검) | P2 | deferred |
+| HTTP/SSE 트랜스포트 + launchd 데몬화 | P2 | deferred |
+| Telegram/email 예산 알람 데몬 | P3 | deferred |
+| 후잉 webhook 수신 → MCP outbound notification | P3 | deferred |
+| IMAP 메일 폴링 (로컬 큐 자동 채움) | P3 | deferred — 로컬 큐의 자연스러운 후속 |
 
 ---
 

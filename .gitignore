@@ -16,5 +16,10 @@ venv/
 .env.*
 !.env.example
 
+# Pending queue (per-machine SQLite — not for git mirror)
+queue.db
+*.sqlite
+*.sqlite3
+
 # OS
 .DS_Store
