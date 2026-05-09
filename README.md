@@ -24,7 +24,7 @@ flowchart TB
 
 ## 목차
 
-- [wrapper 도구 18개](#wrapper-도구-18개)
+- [wrapper 도구 21개](#wrapper-도구-21개)
 - [Quickstart (5분)](#quickstart-5분)
   - [1. AI 연동 토큰 발급](#1-ai-연동-토큰-발급)
   - [2. 공식 후잉 MCP 등록](#2-공식-후잉-mcp-등록)
@@ -35,6 +35,7 @@ flowchart TB
   - [매일: SMS 알림 → 입력](#매일-sms-알림--입력)
   - [주간: audit + dedup](#주간-audit--dedup)
   - [매월: 카드명세서 reconcile](#매월-카드명세서-reconcile)
+  - [매월: PDF/HTML 명세서 자동 import + 정리](#매월-pdfhtml-명세서-자동-import--정리)
   - [거래에 메모·해시태그 달기 + 태그로 역조회](#거래에-메모해시태그-달기--태그로-역조회)
 - [트러블슈팅](#트러블슈팅)
 - [개발](#개발)
@@ -42,7 +43,7 @@ flowchart TB
 
 ---
 
-## wrapper 도구 18개
+## wrapper 도구 21개
 
 ### 후잉 read-only 도구 (7)
 
@@ -88,9 +89,26 @@ flowchart TB
 저장 위치: 본 프로젝트의 `whooing-data.sqlite` (또는 `$WHOOING_QUEUE_PATH`
 override). 후잉 서버의 `memo` 필드는 **변경하지 않음** — 별개의 로컬 레이어.
 
-**위 18개 도구 모두 후잉에 직접 입력 X.** 후잉 가계부에 거래 입력/수정/삭제는
-LLM 이 사용자 확인 후 **공식 MCP** 의 `add_entry` / `update_entry` /
-`delete_entry` 로 처리합니다.
+### 명세서 자동 import + cleanup (3) — 공식 MCP chained call
+
+기존 read-only 정책의 **부분 예외** — 거래 입력/삭제가 필요하지만 wrapper
+가 직접 후잉 REST 를 두드리지 않고 **공식 MCP 의 `entries-create` /
+`entries-delete` 도구를 chained-call**. 모두 `confirm` 또는 `dry_run`
+가드 + `statement_import_log` audit trail.
+
+| 도구 | 한 줄 설명 | 거래 변경? |
+|---|---|---|
+| `whooing_import_pdf_statement` | PDF 카드명세서 → 자동 dedup + categorize + insert | 공식 MCP entries-create |
+| `whooing_import_html_statement` | HTML 보안메일 (CryptoJS AES, Playwright 헤드리스 복호화) → import | 공식 MCP entries-create |
+| `whooing_delete_entries` | 거래 ID 들 영구 삭제 | 공식 MCP entries-delete |
+
+월말 정산 (`whooing_monthly_close`) — audit + dedup + reconcile + 합계 합성:
+
+| 도구 | 한 줄 설명 | API |
+|---|---|---|
+| `whooing_monthly_close` | 한 달치: 통계 + audit + dedup + reconcile (CSV 또는 PDF) | GET /entries |
+
+**21개 도구 합계.** 거래 변경 도구 3개 외 모두 read-only / 부수효과 없음.
 
 ---
 
@@ -411,6 +429,60 @@ entry_id (삭제됐거나 범위 밖). lookback_days 늘리거나 `whooing_remov
 > "'#출장' 태그 붙은 거래 다 보여줘"
 > "지난 1년 동안 '#식비' 로 분류한 거 모아봐"
 
+### `whooing_import_pdf_statement`
+
+PDF 카드명세서 자동 import — dedup + auto-categorize + 공식 MCP 통한 안전 insert.
+
+```
+입력: pdf_path (abs), r_account_id (필수, 카드 매핑 예 'x80'),
+      issuer='auto', section_id?, card_label?,
+      dedup_tolerance_days=2, auto_categorize=True,
+      fallback_l_account_id='x50', dry_run=True, confirm_insert=False
+출력: { summary, proposed, matched_existing, inserted, failed,
+        tracking_log_ids, dry_run, note }
+```
+
+자연어:
+> "이 PDF 명세서 미리 분석해서 안 들어간 거 보여줘: /Users/me/Downloads/2026-05.pdf"
+> "그대로 입력해줘"
+
+지원 카드사 (v0.1.8): 신한카드 PDF, 현대카드 PDF.
+
+### `whooing_import_html_statement`
+
+HTML 보안메일 (CryptoJS AES 암호화) 자동 import — Playwright 헤드리스 복호화
++ PDF import 와 동일한 흐름.
+
+```
+입력: html_path (abs), r_account_id (필수),
+      password_env_var='WHOOING_HANACARD_PASSWORD',
+      issuer='auto', section_id?, card_label?,
+      dry_run=True, confirm_insert=False
+출력: 위 PDF import 와 동일 + issuer_used 필드
+```
+
+지원 (v0.1.8): 하나카드 보안메일 (.html). 의존성 — `playwright install chromium`
+1회 (~150MB).
+
+자연어:
+> "/Users/me/Desktop/hanacard_20260527.html 임포트해줘"
+
+### `whooing_delete_entries`
+
+거래 영구 삭제 — 공식 MCP `entries-delete` chained call.
+
+```
+입력: entry_ids (str | list[str]), section_id?,
+      confirm (bool, **True 필수**), update_import_log=True
+출력: { summary: {requested, deleted_count, failed_count},
+        deleted, failed, log_updates, via='official_mcp/entries-delete' }
+```
+
+자연어:
+> "후잉 entry 1710800, 1710801 삭제해줘"
+
+`confirm=True` 명시 안 하면 ToolError raise (재무 데이터 영구 삭제 가드).
+
 ### `local_annotations` 자동 부착
 
 `whooing_audit_recent_ai_entries` / `whooing_find_entries_by_hashtag` 의
@@ -542,6 +614,43 @@ N건의 후잉 거래 + 각 거래의 로컬 메모/태그 함께 반환 → 합
 > "내가 자주 쓰는 태그 top 10 보여줘"
 
 → `whooing_list_hashtags()` → count 내림차순.
+
+### 매월: PDF/HTML 명세서 자동 import + 정리
+
+`whooing_import_pdf_statement` / `whooing_import_html_statement` 가 dedup +
+auto-categorize + 공식 MCP insert 까지 한 번에 처리. dry_run 으로 미리 보고,
+확인 후 실 입력.
+
+```mermaid
+sequenceDiagram
+    participant User as 사용자
+    participant LLM
+    participant Wrap as wrapper
+    participant Off as 공식 후잉 MCP
+    participant W as 후잉 ledger
+
+    User->>LLM: "5월 명세서 import 해 (hanacard_20260527.html)"
+    LLM->>Wrap: import_html_statement(dry_run=True)
+    Wrap->>Wrap: Playwright 복호화 + 파싱
+    Wrap->>W: list_entries(범위, paginated)
+    Wrap->>Wrap: dedup + suggest_category
+    Wrap-->>LLM: 12 proposed (matched 53 skipped)
+    LLM-->>User: "12건 신규. 이대로 입력?"
+    User->>LLM: "응"
+    LLM->>Wrap: import_html_statement(dry_run=False, confirm_insert=True)
+    loop for each proposed
+        Wrap->>Off: tools/call entries-create
+        Off->>W: POST /entries.json
+        W-->>Off: entry_id
+        Off-->>Wrap: result
+        Wrap->>Wrap: log_one(status='inserted')
+    end
+    Wrap-->>LLM: {inserted: 12, failed: 0}
+    LLM-->>User: 완료 보고
+```
+
+중복이 들어갔다면 `whooing_delete_entries(entry_ids=[...], confirm=True)` 로
+공식 MCP 통해 정리 (역시 자동 tracking 동기화).
 
 ### 매월: 카드명세서 reconcile
 

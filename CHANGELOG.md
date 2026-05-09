@@ -7,97 +7,88 @@
 
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
+* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (현재 v0.1.8 한계).
+* OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
 
-## Unreleased — 2026-05-09 (formal HTML statement import tool)
+## v0.1.8 — 2026-05-09
 
-### Added
+명세서 자동 import 흐름 완성 + 공식 MCP chained call 도입.
 
-* `src/whooing_mcp/html_adapters/` — 신규 module (pdf_adapters/ 평행 구조).
-  * `base.py`: `HTMLDetectResult`, `HtmlDecryptError`, `decrypt_html_with_playwright()` (lazy-import).
-  * `hanacard_secure_mail.py`: 하나카드 보안메일 (CryptoJS AES) 어댑터.
-* `src/whooing_mcp/tools/html_import.py` — 도구 `whooing_import_html_statement`.
-  - Playwright 헤드리스 Chromium 으로 client-side 복호화 → DOM → 거래 추출
-  - PDF import 와 동일한 dedup + auto-categorize + 공식 MCP entries-create 파이프라인 재사용
-  - `password_env_var` (default 'WHOOING_HANACARD_PASSWORD') 에서 패스워드 로드
-  - dry_run safety default + confirm_insert 가드
-* `pyproject.toml`: runtime deps `beautifulsoup4>=4.12`, `playwright>=1.45` 추가
-  (Chromium 다운로드는 `playwright install chromium` — 1회).
-* `tools/pdf_import._log_one()` 에 `source_kind` 인자 추가 (기본 'pdf'). HTML 도구는 'html' 명시.
+### Added (도구 3종 — 18 → 21)
 
-### Tools after this release
+* **#19 `whooing_delete_entries`** (CL 50717 / git f3b0613) — 공식 후잉 MCP 의
+  `entries-delete` 를 chained-call 해 거래 영구 삭제. 본 wrapper 가 직접 후잉
+  REST 를 두드리지 않음 (정책 일관성). `confirm=True` 안전 가드 + `statement_import_log`
+  자동 동기화. rate limit aware (분당 18 self-throttle).
 
-21개 — 신규 `whooing_import_html_statement` (#21).
-
-### Known limitations (v0.x)
-
-* hanacard_secure_mail 파서는 정형 거래 섹션 (5-cell 패턴) 에 최적화. **해외이용내역 상세** 섹션
-  (date / 국가 / 도시 / merchant / currency / amount / rate / KRW / fee 컬럼) 에서는
-  카드번호 같은 값이 merchant 로 잡히는 케이스 존재. 후속 CL 에서 섹션 검출 + 별도 layout 파싱.
-* SMS 환불 (-300) 같은 부호 edge case 도 일부 파서에서 +로 해석 가능.
-  → 정상 거래 99% 는 매칭. dedup 으로 거의 자동 fix.
-
-## Unreleased — 2026-05-09 (formal PDF import tool)
-
-### Added
-
-* `src/whooing_mcp/tools/pdf_import.py` — 정식 도구 `whooing_import_pdf_statement`.
-  - PDF 파싱 (pdf_adapters) + dedup (paginated client.list_entries) +
-    auto-categorize (suggest_category) + 공식 MCP entries-create 통한 안전 insert
-    + statement_import_log tracking + dry_run safety default + confirm_insert 가드.
+* **#20 `whooing_import_pdf_statement`** (CL 50719 / git 3440e01) — PDF 카드명세서
+  자동 import.
+  - `pdf_adapters/` 파싱 (shinhan, hyundai)
+  - dedup (paginated `list_entries` 활용)
+  - auto-categorize (`suggest_category` 호출)
+  - 공식 MCP `entries-create` 로 안전 insert
+  - `statement_import_log` tracking
+  - `dry_run=True` safety default + `confirm_insert=True` 가드
   - CL 50708 의 일회용 스크립트 (`tests/_pdf_import_2026_04.py`) 일반화.
-* `src/whooing_mcp/client.py` — `list_accounts(section_id)` + `flatten_accounts()`
-  헬퍼. PDF import 의 account_id ↔ type/name 매핑용.
 
-### Tools after this release
+* **#21 `whooing_import_html_statement`** (CL 50739 / git 01eb2eb) — HTML 보안메일
+  자동 import (예: 하나카드 CryptoJS AES 암호화 .html).
+  - Playwright 헤드리스 Chromium 으로 client-side 복호화
+  - `password_env_var` (default `WHOOING_HANACARD_PASSWORD`) 에서 패스워드 로드
+  - DOM 파싱 → PDF import 와 동일한 dedup/categorize/insert 파이프라인 재사용
 
-20개 — 신규 `whooing_import_pdf_statement` 추가.
+### Added (인프라)
 
-## Unreleased — 2026-05-09 (delete via official MCP)
-
-### Added
-
-* `src/whooing_mcp/official_mcp.py` — 공식 후잉 MCP (`whooing.com/mcp`) HTTP
-  JSON-RPC 클라이언트. `OfficialMcpClient.list_tools()` / `call_tool()`.
-  서버는 stateless 라 init/initialized handshake 없이 단일 request 로 호출
-  가능 (probe 검증 2026-05-09).
-* 도구 `whooing_delete_entries` (총 19개) — 공식 MCP 의 `entries-delete` 를
-  chained-call. confirm=True 가드 + statement_import_log 자동 동기화. 본
-  wrapper 의 read-only 정책 부분 예외 (직접 REST X, 공식 MCP 위임).
-
-### Why
-2026-05-09 PDF import 작업 중 후잉 REST DELETE 가 우리 호출에 응답 안 함이
-확인됐고, 사용자가 수동 cleanup. 본 CL 은 그 과정을 자동화 — 공식 MCP 의
-entries-delete (검증된 호출 형식) 를 wrapper 가 대신 호출.
-
-### Verified (live)
-* 존재하지 않는 entry_id → official MCP isError 응답 정상 capture.
-* test section 에 entry 임시 입력 → 새 도구로 삭제 → success.
-
-## Unreleased — 2026-05-09 (PDF import session)
-
-### Added
-
-* `src/whooing_mcp/queue.py` SCHEMA_VERSION 2 → 3: `statement_import_log`
-  테이블 신규. 카드명세서 PDF/CSV import 시 어느 파일/라인 → 어느 후잉
-  entry_id 로 들어갔는지 audit trail. 향후 정식 import 도구 (deferred)
-  의 backing store.
-* `tests/_pdf_import_2026_04.py` — 2026-04 하나카드 명세서 import
-  일회용 스크립트. 향후 정식 `whooing_import_pdf_statement` 도구의 reference.
-* `tests/_probe_s9046.py` — accounts/entries 구조 탐색 helper.
+* `src/whooing_mcp/official_mcp.py` — 공식 MCP HTTP JSON-RPC 클라이언트
+  (`OfficialMcpClient.list_tools()` / `call_tool()`). 서버는 stateless —
+  init/initialized handshake 없이 단일 request 로 tool 호출. delete + import
+  도구의 backbone.
+* `src/whooing_mcp/html_adapters/` — pdf_adapters 평행 구조. `base.py`
+  (HTMLDetectResult + `decrypt_html_with_playwright()` lazy-import) +
+  `hanacard_secure_mail.py`.
+* `src/whooing_mcp/client.py` — `list_accounts()` + `flatten_accounts()` —
+  PDF/HTML import 의 account_id ↔ (type, name) 매핑용.
+* `pyproject.toml` runtime deps 추가: `beautifulsoup4>=4.12`, `playwright>=1.45`
+  (Chromium 다운로드 1회 — `playwright install chromium`).
+* `tools/pdf_import._log_one()` `source_kind` 파라미터 (기본 'pdf' / HTML 은 'html').
 
 ### Fixed (Critical)
 
-* `client.list_entries` — 후잉 server-side 100-cap 발견 → bisection
-  pagination 구현. 이전엔 `limit=1000` 줘도 100 만 반환되어, 한 달치 거래
-  > 100인 활발한 ledger 에서 누락 발생. 본 fix 후 122건 등 정상 반환.
-* (직전 git c297054 의 `entries`→`rows` fix 와 함께 확인된 버그.)
+* **`client.list_entries`** — 후잉 응답 키 `entries` → 실은 `rows` (CL 50703 /
+  git c297054). 모든 read 도구가 실 ledger 에서 빈 결과 반환 중이었음
+  (단위 테스트는 FakeClient 분리 때문에 통과해서 안 보임).
 
-### Known issues / TODO
+* **`client.list_entries`** — 서버 100 hard cap 발견 (CL 50708 / git 9489560).
+  `limit` / `page` / `offset` / `X-HTTP-Method-Override` 모두 무동작. **Date-range
+  bisection** 으로 자동 분할 + entry_id 기준 dedup. 이전 100건 → 본 fix 후
+  122건 (한 달치 활발한 ledger 모두 반환).
 
-* 후잉 REST API 의 DELETE entry 호출 형식 미확정 — 5+ 패턴 시도 모두
-  실패 ("section_id parameter is required" 또는 "Unknown method").
-  현재 wrapper 는 read-only 라 영향 X, 사용자가 공식 MCP 또는 web UI
-  로 처리. 향후 정식 도구화 시 후잉 운영자에게 문의 필요.
+### Schema bump v2 → v3
+
+* `statement_import_log` (CL 50708) — PDF/CSV/HTML import audit trail.
+  source_file, source_kind ('pdf'|'csv'|'html'), 거래 정보, 후잉 entry_id, status
+  ('inserted'|'failed'|'dry_run'|'deleted'|'duplicate_pending_delete'|'inserted_then_duped'),
+  imported_at 등 22 필드.
+
+### Known limitations / TODO
+
+* 후잉 REST API 의 DELETE entry 형식이 우리 직접 호출에 응답 안 함 — 5+ 패턴
+  시도 모두 실패 ("section_id parameter is required" 또는 "Unknown method").
+  → **`whooing_delete_entries` 가 공식 MCP `entries-delete` 를 통과** 함으로써
+  우회 (검증된 호출 형식). 본 wrapper read-only 정책 일부 예외.
+* `hanacard_secure_mail` 파서는 정형 거래 섹션 (5-cell 패턴) 에 최적화.
+  **해외이용내역 상세** 섹션 (date / 국가 / 도시 / merchant / currency /
+  amount / rate / KRW / fee 컬럼) 에서는 카드번호 같은 값이 merchant 로
+  잡히는 케이스. 후속 CL 에서 섹션 검출 + layout 분기.
+* PDF import 는 텍스트 추출 가능 PDF 만 — 이미지 PDF 는 OCR 필요 (deferred).
+
+### Developer scripts (committed for posterity)
+
+* `tests/_pdf_import_2026_04.py` — 2026-04 하나카드 명세서 import 일회용
+  reference (정식 `whooing_import_pdf_statement` 의 prototype).
+* `tests/_probe_s9046.py` — accounts/entries 구조 탐색 helper.
+* `tests/_decrypt_hanacard_html.py` — 하나카드 HTML 복호화 일회용 검증
+  reference (정식 `whooing_import_html_statement` 의 prototype).
 
 ## v0.1.7 — 2026-05-09
 
