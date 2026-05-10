@@ -71,6 +71,11 @@ def _load_env() -> None:
     except IndexError:
         pass  # __file__ 위치가 예상과 다른 install (wheel 등)
 
+    # 공통 위치 — whooing-tui (monorepo `tui/`) 와 같은 후보를 사용해 두
+    # 도구가 토큰 1개를 공유. 우선순위는 wrapper 자체 위치 (`whooing-mcp`)
+    # 보다 높여 사용자가 의도적으로 옮기면 양쪽 자동 정렬되게 한다.
+    candidates.append(Path.home() / ".config" / "whooing" / ".env")
+    # legacy — wrapper 만 사용하던 경로. backward compat.
     candidates.append(Path.home() / ".config" / "whooing-mcp" / ".env")
 
     for c in candidates:
