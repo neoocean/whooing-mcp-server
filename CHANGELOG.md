@@ -7,8 +7,44 @@
 
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
-* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (현재 v0.1.9 한계).
+* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (v0.1.10 한계).
 * OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
+* `remove_attachment` 의 P4 sync 보완 (현재 db 만 sync, 삭제된 파일도 함께).
+* Makefile + GitHub Actions CI.
+
+## v0.1.10 — 2026-05-10
+
+P4 sync 다중 파일 일반화 — db + 첨부파일 한 CL 로 자동 submit.
+
+### Added
+
+* `src/whooing_mcp/p4_sync.py` 신규 함수:
+  `sync_paths_to_p4(action_summary, paths: list[Path])` — 임의 경로 list 의
+  변경 (add/edit) 을 한 numbered CL 로 묶어 submit. 각 path 의 P4 상태 자동
+  감지 (depot 미등록 → add + 자동 binary type, 등록됐고 변경 → edit).
+* `_p4_filetype()` — 확장자 기반 자동 type 결정 (`.sqlite`, `.pdf`, `.png`,
+  `.zip` 등 → 'binary').
+* P4IGNORE 우회 (`P4IGNORE=/dev/null`) — `attachments/*` 가 워크스페이스
+  ignore 에 안 잡혀도 안전.
+
+### Changed
+
+* `sync_db_to_p4(action_summary)` 는 내부적으로 `sync_paths_to_p4(...,
+  paths=[default_queue_path()])` 호출 (backward compat).
+* `tools/attachments.py` `attach_file_to_entry` → `sync_paths_to_p4(...,
+  paths=[db, copied_file_absolute])`. 응답의 `p4_sync.cl` 한 번에 db + 새
+  파일 submit 결과 포함.
+
+### Why
+
+CL 50749 (Atlassian invoice 첨부) 가 manual `p4 add` + `p4 submit` 필요했음
+(자동 sync 가 db 만 처리). 사용자 정책 ("매 변경마다 자동 submit") 일관성
+복원.
+
+### Verified
+
+* pytest -q → 301 passed.
+* Live: 새 첨부파일 + db 모두 단일 CL 로 자동 submit.
 
 ## v0.1.9 — 2026-05-09
 
