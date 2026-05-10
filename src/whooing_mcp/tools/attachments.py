@@ -196,8 +196,23 @@ async def remove_attachment(
             f"attachment_id={attachment_id} 가 db 에 없음 (이미 삭제됐거나 잘못된 ID).",
         )
 
-    sync = sync_db_to_p4(
-        f"attachment.remove (id={attachment_id}, entry={deleted['entry_id']})"
+    # db + (디스크에서 실제 삭제된) 첨부파일 모두 한 CL 로 sync.
+    # 다른 row 가 같은 sha256 참조해서 디스크 보존된 경우 (file_kept_other_refs)
+    # 는 db 만 sync.
+    sync_paths = [default_queue_path()]
+    if deleted.get("file_deleted") and deleted.get("file_path"):
+        from pathlib import Path
+        rel = deleted["file_path"]
+        rel_p = Path(rel)
+        if rel_p.is_absolute():
+            sync_paths.append(rel_p)
+        else:
+            project_root = Path(__file__).resolve().parents[3]
+            sync_paths.append(project_root / rel)
+
+    sync = sync_paths_to_p4(
+        f"attachment.remove (id={attachment_id}, entry={deleted['entry_id']})",
+        paths=sync_paths,
     )
     return {
         "removed": True,
