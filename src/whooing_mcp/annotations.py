@@ -10,10 +10,13 @@ CRUD / parse / normalize 함수들 (v0.1.x 잔재) 은 Phase 2.3 에서 제거�
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
 
-from whooing_mcp.queue import open_db
+from whooing_mcp.queue import open_db_ro
+
+log = logging.getLogger(__name__)
 
 
 def get_annotations(
@@ -56,8 +59,13 @@ def attach_annotations(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
             dict(e, local_annotations={"note": None, "hashtags": []})
             for e in entries
         ]
-    with open_db() as conn:
-        annotations_map = get_annotations(conn, ids)
+    try:
+        with open_db_ro() as conn:
+            annotations_map = get_annotations(conn, ids)
+    except (FileNotFoundError, sqlite3.OperationalError) as ex:
+        # db 없음 또는 테이블 없음 (TUI 가 init 하기 전) — graceful degrade
+        log.debug("attach_annotations skip: %s", ex)
+        annotations_map = {}
     out = []
     for e in entries:
         eid = str(e.get("entry_id")) if e.get("entry_id") else None

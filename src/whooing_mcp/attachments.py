@@ -9,10 +9,13 @@ Storage / CRUD 함수들은 whooing_core.attachments 로 이전됨 (Phase 1).
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
 
-from whooing_mcp.queue import open_db
+from whooing_mcp.queue import open_db_ro
+
+log = logging.getLogger(__name__)
 
 
 def list_attachments_for(
@@ -48,8 +51,12 @@ def attach_attachments(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ids = [str(e.get("entry_id")) for e in entries if e.get("entry_id")]
     if not ids:
         return [dict(e, local_attachments=[]) for e in entries]
-    with open_db() as conn:
-        attachments_map = list_attachments_for(conn, ids)
+    try:
+        with open_db_ro() as conn:
+            attachments_map = list_attachments_for(conn, ids)
+    except (FileNotFoundError, sqlite3.OperationalError) as ex:
+        log.debug("attach_attachments skip: %s", ex)
+        attachments_map = {}
     out = []
     for e in entries:
         eid = str(e.get("entry_id")) if e.get("entry_id") else None

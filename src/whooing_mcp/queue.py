@@ -49,7 +49,12 @@ def _now_iso() -> str:
 
 @contextmanager
 def open_db(path: Path | None = None):
-    """Yield a connection. Creates schema on first open."""
+    """Yield a read-write connection. Creates schema on first open.
+
+    Used for tables wrapper still owns or shares write access to:
+    `pending` (wrapper-only) and `statement_import_log` (shared with TUI —
+    wrapper writes via delete_entries to mark `status='deleted'`).
+    """
     if path is None:
         path = default_queue_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +64,31 @@ def open_db(path: Path | None = None):
         _ensure_schema(conn)
         yield conn
         conn.commit()
+    finally:
+        conn.close()
+
+
+@contextmanager
+def open_db_ro(path: Path | None = None):
+    """Yield a strictly read-only connection (`mode=ro` URI).
+
+    For wrapper helpers that SELECT from annotation/hashtag/entry_attachments
+    tables — those are TUI-owned (whooing-tui v0.4.0+ writes via
+    whooing_core.db). Any wrapper write attempt raises OperationalError.
+
+    db 가 없으면 (TUI 미실행) FileNotFoundError; caller 가 graceful degrade.
+    """
+    if path is None:
+        path = default_queue_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"db 가 없음: {path}. whooing-tui 를 먼저 실행하거나 "
+            f"WHOOING_QUEUE_PATH override 확인."
+        )
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
     finally:
         conn.close()
 
