@@ -12,12 +12,12 @@ from typing import Any
 from rapidfuzz import fuzz
 
 from whooing_mcp.client import WhooingClient
-from whooing_mcp.csv_adapters import detect, known_issuers, parse
+from whooing_core.csv_adapters import detect, known_issuers, parse
 from whooing_mcp.dates import date_diff_days, parse_yyyymmdd
 from whooing_mcp.models import ToolError
-from whooing_mcp.pdf_adapters import detect as pdf_detect
-from whooing_mcp.pdf_adapters import known_issuers as pdf_known_issuers
-from whooing_mcp.pdf_adapters import parse as pdf_parse
+from whooing_core.pdf_adapters import detect as pdf_detect
+from whooing_core.pdf_adapters import known_issuers as pdf_known_issuers
+from whooing_core.pdf_adapters import parse as pdf_parse
 
 
 # ---- whooing_csv_format_detect ------------------------------------------

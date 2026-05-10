@@ -32,6 +32,11 @@ install:
 	@if [ ! -d $(VENV) ]; then \
 		python3 -m venv $(VENV); \
 	fi
+	# whooing-core 를 sibling monorepo (../whooing-tui/core) 에서 editable
+	# install. 본 머신 dev 우선; pyproject.toml 의 git+https spec 은 CI fallback.
+	@if [ -d ../whooing-tui/core ]; then \
+		$(PIP) install --quiet -e ../whooing-tui/core; \
+	fi
 	$(PIP) install --quiet -e .[dev]
 	$(VENV)/bin/playwright install chromium
 

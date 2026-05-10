@@ -29,9 +29,9 @@ from whooing_mcp.client import WhooingClient
 from whooing_mcp.dates import KST, date_diff_days, parse_yyyymmdd
 from whooing_mcp.models import ToolError
 from whooing_mcp.official_mcp import OfficialMcpClient, OfficialMcpError
-from whooing_mcp.pdf_adapters import detect as pdf_detect
-from whooing_mcp.pdf_adapters import known_issuers as pdf_known_issuers
-from whooing_mcp.pdf_adapters import parse as pdf_parse
+from whooing_core.pdf_adapters import detect as pdf_detect
+from whooing_core.pdf_adapters import known_issuers as pdf_known_issuers
+from whooing_core.pdf_adapters import parse as pdf_parse
 from whooing_mcp.queue import open_db
 from whooing_mcp.tools.category import suggest_category
 

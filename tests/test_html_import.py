@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from whooing_mcp.csv_adapters.base import CSVRow
-from whooing_mcp.html_adapters.hanacard_secure_mail import (
+from whooing_core.csv_adapters.base import CSVRow
+from whooing_core.html_adapters.hanacard_secure_mail import (
     _extract_rows_from_decrypted,
     is_match,
 )

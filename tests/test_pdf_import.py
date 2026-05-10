@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whooing_mcp.csv_adapters.base import CSVRow
+from whooing_core.csv_adapters.base import CSVRow
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools import pdf_import as pdf_import_mod
 from whooing_mcp.tools.pdf_import import import_pdf_statement

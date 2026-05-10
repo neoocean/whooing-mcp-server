@@ -10,13 +10,13 @@ import os
 from typing import Any
 
 from whooing_mcp.client import WhooingClient
-from whooing_mcp.html_adapters import detect as html_detect
-from whooing_mcp.html_adapters import known_issuers as html_known_issuers
-from whooing_mcp.html_adapters.base import HtmlDecryptError
-from whooing_mcp.html_adapters.hanacard_secure_mail import (
+from whooing_core.html_adapters import detect as html_detect
+from whooing_core.html_adapters import known_issuers as html_known_issuers
+from whooing_core.html_adapters.base import HtmlDecryptError
+from whooing_core.html_adapters.hanacard_secure_mail import (
     parse_html_async as parse_hanacard_async,
 )
-from whooing_mcp.html_adapters.hyundaicard_secure_mail import (
+from whooing_core.html_adapters.hyundaicard_secure_mail import (
     parse_html_async as parse_hyundaicard_async,
 )
 from whooing_mcp.models import ToolError
