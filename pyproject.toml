@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "whooing-mcp-server-wrapper"
-version = "0.1.0"
+version = "0.1.12"
 description = "Wrapper MCP server for Whooing — complementary tools on top of official whooing.com/mcp. Provides SMS/email parsing, audit, dedup, CSV/PDF reconcile, category learning, local pending queue."
 readme = "README.md"
 requires-python = ">=3.11"

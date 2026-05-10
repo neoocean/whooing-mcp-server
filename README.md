@@ -224,8 +224,14 @@ $EDITOR .env
 
 ```
 WHOOING_AI_TOKEN=__eyJh...
-WHOOING_SECTION_ID=s133178   # 권장: 테스트 섹션. 미설정 시 첫 섹션 자동
+WHOOING_SECTION_ID=s133178             # 권장: 테스트 섹션. 미설정 시 첫 섹션 자동
+WHOOING_CARD_HTML_PASSWORD=820115      # (선택) 카드 보안메일 HTML 복호화 — 생년월일 6자리
 ```
+
+`WHOOING_CARD_HTML_PASSWORD` 는 `whooing_import_html_statement` 도구가 카드사
+보안메일 (.html) 을 Playwright 헤드리스 복호화할 때 사용. 한국 카드사
+(하나/현대/...) 모두 동일한 생년월일 6자리 (YYMMDD) → 1개 키 공유.
+사용하지 않을 거면 생략 가능.
 
 `WHOOING_SECTION_ID` 가 미설정이면 첫 섹션이 자동 선택됩니다 — 의도치 않은
 가계부가 잡힐 수 있어 **명시 강력 권장**.
@@ -491,6 +497,7 @@ backward-compat fallback 으로 인정.
 
 자연어:
 > "/Users/me/Desktop/hanacard_20260527.html 임포트해줘"
+> "/Users/me/Downloads/hyundaicard_20260425.html 중복 없이 기록해줘"
 
 ### `whooing_delete_entries`
 

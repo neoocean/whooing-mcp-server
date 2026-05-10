@@ -11,6 +11,40 @@
 * OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
 * 추가 카드사 (삼성/국민/우리/신한) HTML adapter — 현재 하나/현대만.
 
+## v0.1.12 — 2026-05-10
+
+P4 빈 changelist leak 수정 + 테스트 격리 강화.
+
+### Fixed
+
+* `sync_paths_to_p4` 가 `p4 add/edit/submit` 단계 실패 시 numbered CL 을
+  서버에 빈 채로 leak 시키던 버그. 이제 실패 시 자동으로 open 된 파일을
+  revert + CL 을 `p4 change -d` 로 삭제. (검증 2026-05-10: 60+ 빈 CL 누적
+  확인 후 정리.)
+* `tests/conftest.py` 신규 — `autouse` fixture 로 p4_sync 강제 disable.
+  머신의 실 `whooing-mcp.toml` 이 `enabled=true` 여도 (실 사용자 default)
+  pytest 도중 sync 가 fire 하지 않음. tmp_path 가 client view 밖이라
+  발생하던 leak 의 근본 원인.
+
+### Added
+
+* `tests/test_p4_sync.py` — 2개 신규 케이스
+  (`test_p4_add_failure_deletes_empty_cl`, `test_p4_submit_failure_deletes_empty_cl`)
+  로 cleanup mock-검증.
+* `_cleanup_failed_cl(cl_num, opened_paths)` private helper — best-effort
+  revert + delete.
+
+### Why
+
+사용자 발견: "퍼포스 서브밋할 때 빈 체인지리스트를 남기고 있다." 60개
+이상의 leaked CL 을 수동 삭제 + 본 fix 로 미래 leak 방지.
+
+### Verified
+
+* pytest -q → 320 passed (310 기존 + 2 leak fix + 8 conftest 영향 없는 기타).
+* Live: 60+ leaked CLs 일괄 삭제 (CL 50764-50917 + 50926).
+* P4 `changes -s pending -u woojinkim` → 0 pending (clean).
+
 ## v0.1.11 — 2026-05-10
 
 현대카드 HTML 보안메일 (Yettiesoft vestmail) import 지원 + 카드 패스워드
@@ -45,10 +79,16 @@
 
 ### Verified
 
-* pytest -q → 302 passed (300 기존 + 1 신규 + 1 hyundai detect).
+* pytest -q → 310 passed (294 기존 + 16 신규 hyundai unit tests).
 * `make tools` → 24 tools.
-* live decrypt: `/Users/neoocean/Downloads/hyundaicard_20260425.html` 복호화
-  + entries-create (dry_run 으로 사전 검토 후 실 입력).
+* live decrypt: `/Users/neoocean/Downloads/hyundaicard_20260425.html` (442KB)
+  → 9건 추출 (총 102,309원 = 31,573 일시불 + 70,436 해외 + 300 수수료).
+* dry_run → 1건 dedup (카드이용알림수수료04월, entry=1707249) +
+  8건 신규 제안.
+* 실 입력 → entry_ids 1710783-1710790 (공식 MCP `entries-create`).
+  카테고리: 파리바게뜨 6건 → 식비(x50), KCP-알라딘 → 공부(x120),
+  Hetzner → 소프트웨어(x99). r_account 모두 [우진]현대카드(x153).
+* statement_import_log 동기화: log_id 84-92 → P4 CL 50925 (db auto-sync).
 
 ## v0.1.10 — 2026-05-10
 

@@ -153,8 +153,10 @@ def sync_paths_to_p4(action_summary: str, paths: list[Path]) -> dict:
     # CL description 빌드
     desc = _build_description(action_summary, files_to_open)
 
+    cl_num: int | None = None
+    opened_paths: list[Path] = []  # 성공적으로 open 된 파일 (cleanup 용)
     try:
-        # 1) p4 change -i
+        # 1) p4 change -i (CL 생성 — 이 시점에는 attached file 이 없음)
         change_form = (
             "Change: new\n"
             f"Description:\n\t{desc.replace(chr(10), chr(10) + chr(9))}\n"
@@ -166,7 +168,6 @@ def sync_paths_to_p4(action_summary: str, paths: list[Path]) -> dict:
         )
         if r.returncode != 0:
             return {"ok": False, "skipped": False, "message": f"p4 change -i 실패: {r.stderr}"}
-        cl_num = None
         for word in r.stdout.split():
             if word.isdigit():
                 cl_num = int(word)
@@ -174,25 +175,25 @@ def sync_paths_to_p4(action_summary: str, paths: list[Path]) -> dict:
         if cl_num is None:
             return {"ok": False, "skipped": False, "message": f"CL 번호 파싱 실패: {r.stdout!r}"}
 
-        # 2) 각 파일 add 또는 edit
+        # 2) 각 파일 add 또는 edit. 하나라도 실패하면 cleanup 으로 진입.
         opened_files: list[dict] = []
+        import os as _os
+        env = {**_os.environ, "P4IGNORE": "/dev/null"}
         for path, action in files_to_open:
             if action == "add":
                 cmd = ["p4", "add", "-c", str(cl_num),
                        "-t", _p4_filetype(path), str(path)]
             else:  # edit
                 cmd = ["p4", "edit", "-c", str(cl_num), str(path)]
-            # P4IGNORE 우회 — attachments/* 가 차단 안 됐어도 안전
-            import os
-            env = {**os.environ, "P4IGNORE": "/dev/null"}
             sp = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
             if sp.returncode != 0:
+                _cleanup_failed_cl(cl_num, opened_paths)
                 return {
                     "ok": False, "skipped": False,
-                    "message": f"p4 {action} 실패 ({path}): {sp.stderr}",
-                    "cl": cl_num,
+                    "message": f"p4 {action} 실패 ({path}): {sp.stderr.strip()} — 빈 CL 정리됨",
                 }
             opened_files.append({"path": str(path), "action": action})
+            opened_paths.append(path)
 
         # 3) submit
         s = subprocess.run(
@@ -200,10 +201,10 @@ def sync_paths_to_p4(action_summary: str, paths: list[Path]) -> dict:
             capture_output=True, text=True, timeout=60,
         )
         if s.returncode != 0:
+            _cleanup_failed_cl(cl_num, opened_paths)
             return {
                 "ok": False, "skipped": False,
-                "message": f"p4 submit 실패: {s.stderr}",
-                "cl": cl_num,
+                "message": f"p4 submit 실패: {s.stderr.strip()} — 빈 CL 정리됨",
             }
 
         # CL renamed 처리
@@ -220,7 +221,38 @@ def sync_paths_to_p4(action_summary: str, paths: list[Path]) -> dict:
             "message": f"CL {final_cl} submitted ({len(opened_files)} files: {action_summary})",
         }
     except (subprocess.TimeoutExpired, OSError) as e:
+        if cl_num is not None:
+            _cleanup_failed_cl(cl_num, opened_paths)
         return {"ok": False, "skipped": False, "message": f"p4 명령 실패: {e}"}
+
+
+def _cleanup_failed_cl(cl_num: int, opened_paths: list[Path]) -> None:
+    """add/edit/submit 실패 시 — open 된 파일 revert + CL 삭제.
+
+    Without this, 빈 (또는 부분 채워진) numbered CL 이 P4 서버에 영원히 남는다
+    (서버 leak — 검증 2026-05-10: 60+ 빈 CL 누적). best-effort: cleanup 자체가
+    실패해도 silent skip — 본 함수는 caller 의 에러 응답을 가리지 않는다.
+    """
+    import os as _os
+    env = {**_os.environ, "P4IGNORE": "/dev/null"}
+    # 1) open 된 파일이 있으면 revert
+    for p in opened_paths:
+        try:
+            subprocess.run(
+                ["p4", "revert", "-c", str(cl_num), str(p)],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            log.warning("cleanup: revert failed for %s (cl=%d)", p, cl_num)
+    # 2) CL 삭제
+    try:
+        subprocess.run(
+            ["p4", "change", "-d", str(cl_num)],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        log.info("cleanup: empty CL %d deleted", cl_num)
+    except (subprocess.TimeoutExpired, OSError):
+        log.warning("cleanup: failed to delete CL %d", cl_num)
 
 
 def _build_description(action_summary: str, files_to_open: list[tuple[Path, str]]) -> str:

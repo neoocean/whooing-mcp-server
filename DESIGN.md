@@ -238,7 +238,7 @@ whooing-mcp-server-wrapper/
 
 ---
 
-## §6. 도구 명세 (v0.1.10: 24개)
+## §6. 도구 명세 (v0.1.12: 24개)
 
 ### §6.1 `whooing_parse_payment_sms`
 
@@ -567,6 +567,13 @@ suffix.
 [db, copied_file])` — db + 새 첨부파일 단일 numbered CL 로 묶여 submit
 (v0.1.10).
 
+**빈 CL leak 방지 (v0.1.12):** `sync_paths_to_p4` 의 어느 단계 (add/edit/
+submit) 에서 실패가 발생하면 `_cleanup_failed_cl()` 가 자동으로 open 된
+파일 revert + `p4 change -d <cl>` 로 numbered CL 을 삭제. 또한
+`tests/conftest.py` 가 `autouse` fixture 로 모든 테스트에 대해 p4_sync
+강제 disable — 머신 default 가 enabled 여도 pytest tmp_path 에서 sync 가
+fire 하지 않음.
+
 **Mirror 정책 (DESIGN §13.2):**
 - **GitHub**: `attachments/README.md` 만 commit (디렉터리 용도 설명).
   나머지 모든 첨부파일 차단 — `.gitignore` 의 `attachments/*` +
@@ -757,7 +764,7 @@ claude mcp add whooing-extras python -m whooing_mcp --scope user \
 | CSV adapter 추가 | P1 | ✅ 4종 (신한/국민/현대/삼성) — 점진 |
 | **PDF reconcile** | P1 | **✅ 완료 — `whooing_reconcile_pdf` + `whooing_pdf_format_detect`** |
 | **PDF 자동 import (insert)** | P1 | **✅ 완료 — `whooing_import_pdf_statement` (§6.8.1)** |
-| **HTML 보안메일 import** | P1 | **✅ 완료 — `whooing_import_html_statement` (§6.8.2, 하나카드)** |
+| **HTML 보안메일 import** | P1 | **✅ 완료 — `whooing_import_html_statement` (§6.8.2, 하나/현대카드 — v0.1.11)** |
 | **거래 영구 삭제** | P1 | **✅ 완료 — `whooing_delete_entries` (§6.8.3, 공식 MCP chained)** |
 | **거래 ↔ 첨부파일 (PDF 인보이스 등)** | P1 | **✅ 완료 — attach/list/remove 3 도구 + entry_attachments 테이블 (§6.9, v0.1.9)** |
 | **P4 자동 sync 다중 파일** (db + 첨부) | P2 | **✅ 완료 — sync_paths_to_p4 (v0.1.10)** |

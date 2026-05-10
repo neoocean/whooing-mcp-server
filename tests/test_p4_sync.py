@@ -186,6 +186,47 @@ def test_reconcile_to_edit_pattern_also_recognized(tmp_db_in_path, monkeypatch):
     assert out["cl"] == 200
 
 
+# ---- v0.1.12: empty-CL leak prevention ---------------------------------
+
+
+def test_p4_add_failure_deletes_empty_cl(tmp_db_in_path, monkeypatch):
+    """v0.1.12: p4 add 실패 시 빈 CL 자동 삭제 (서버 leak 방지).
+
+    검증 (2026-05-10): tests/conftest.py 가 p4_sync 강제 disable 하기 전,
+    pytest tmp_path 가 client view 밖이라 p4 add 가 실패하면서도 CL 만
+    leak 했음 (60+ 개 누적).
+    """
+    monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
+    monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
+    _mock_subprocess(monkeypatch, [
+        (0, "//.../db.sqlite - opened for edit", ""),  # reconcile -n
+        (0, "Change 999 created.", ""),                 # p4 change -i
+        (1, "", "file(s) not in client view"),          # p4 edit fails
+        (0, "Change 999 deleted.", ""),                 # cleanup: p4 revert
+        (0, "Change 999 deleted.", ""),                 # cleanup: p4 change -d
+    ])
+    out = p4_sync.sync_db_to_p4("leak test")
+    assert out["ok"] is False
+    assert "정리됨" in out["message"]
+
+
+def test_p4_submit_failure_deletes_empty_cl(tmp_db_in_path, monkeypatch):
+    """submit 단계 실패도 cleanup 트리거."""
+    monkeypatch.setattr(p4_sync, "is_p4_available", lambda: True)
+    monkeypatch.setattr(p4_sync, "is_db_in_depot", lambda _: True)
+    _mock_subprocess(monkeypatch, [
+        (0, "//.../db.sqlite - opened for edit", ""),
+        (0, "Change 800 created.", ""),
+        (0, "edited", ""),
+        (1, "", "submit blocked by trigger"),  # submit fails
+        (0, "Change 800 deleted.", ""),         # cleanup: revert
+        (0, "Change 800 deleted.", ""),         # cleanup: change -d
+    ])
+    out = p4_sync.sync_db_to_p4("submit-fail test")
+    assert out["ok"] is False
+    assert "정리됨" in out["message"]
+
+
 # ---- _build_description -----------------------------------------------
 
 
