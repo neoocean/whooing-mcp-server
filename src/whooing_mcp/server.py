@@ -513,16 +513,17 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(
         description=(
-            "HTML 카드 보안메일 (예: 하나카드 CryptoJS AES 암호화 .html) 을 복호화 + "
+            "HTML 카드 보안메일 (하나카드 CryptoJS AES / 현대카드 vestmail 등) 을 복호화 + "
             "import. Playwright 헤드리스 Chromium 으로 client-side 복호화 → DOM 에서 "
             "거래 추출 → dedup + auto-categorize + 공식 MCP entries-create. password 는 "
-            "환경변수 (default: WHOOING_HANACARD_PASSWORD) 에서 읽음. dry_run safety default."
+            "환경변수 WHOOING_CARD_HTML_PASSWORD (한국 카드사 모두 공통 — 생년월일 6자리) "
+            "에서 읽음. dry_run safety default. 지원 issuer: hanacard / hyundaicard secure_mail."
         )
     )
     async def whooing_import_html_statement(
         html_path: str,
         r_account_id: str,
-        password_env_var: str = "WHOOING_HANACARD_PASSWORD",
+        password_env_var: str = "auto",
         issuer: str = "auto",
         section_id: str | None = None,
         card_label: str | None = None,

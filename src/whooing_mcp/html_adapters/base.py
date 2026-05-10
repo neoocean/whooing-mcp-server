@@ -28,8 +28,13 @@ async def decrypt_html_with_playwright(
     submit_function: str = "UserFunc()",
     wait_after_submit_ms: int = 2000,
     expected_alert_substrings: list[str] | None = None,
+    prefill_js: str | None = None,
 ) -> str:
     """JS 가 client-side 복호화하는 HTML 을 헤드리스 Chromium 으로 처리.
+
+    Args:
+      prefill_js: 패스워드 fill **전에** 실행할 JS (선택). 예: hyundai vestmail
+        은 `#password` 가 `display:none` 으로 시작하므로 visible 처리 필요.
 
     Returns:
       복호화 후 page.content() (전체 평문 HTML)
@@ -66,6 +71,8 @@ async def decrypt_html_with_playwright(
             page.on("dialog", on_dialog)
 
             await page.goto(file_url, wait_until="load")
+            if prefill_js:
+                await page.evaluate(prefill_js)
             await page.fill(password_input_selector, password)
             await page.evaluate(submit_function)
             await page.wait_for_timeout(wait_after_submit_ms)

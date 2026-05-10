@@ -132,7 +132,9 @@ class FakeClient:
 
 @pytest.fixture
 def env_with_password(monkeypatch, tmp_path):
-    monkeypatch.setenv("WHOOING_HANACARD_PASSWORD", "test123456")
+    # v0.1.11: 단일 공유 키. 한국 카드사 모두 생년월일 6자리 공통 사용.
+    monkeypatch.setenv("WHOOING_CARD_HTML_PASSWORD", "test123456")
+    monkeypatch.delenv("WHOOING_HANACARD_PASSWORD", raising=False)
     monkeypatch.setenv("WHOOING_AI_TOKEN", "__eyJh" + "x" * 100)
     monkeypatch.setenv("WHOOING_QUEUE_PATH", str(tmp_path / "queue.db"))
     yield
@@ -155,6 +157,8 @@ async def test_missing_file_rejected(env_with_password):
 
 
 async def test_missing_password_rejected(monkeypatch, tmp_path):
+    # v0.1.11: 새/옛 키 모두 비어있어야 거부.
+    monkeypatch.delenv("WHOOING_CARD_HTML_PASSWORD", raising=False)
     monkeypatch.delenv("WHOOING_HANACARD_PASSWORD", raising=False)
     monkeypatch.setenv("WHOOING_QUEUE_PATH", str(tmp_path / "q.db"))
     monkeypatch.setenv("WHOOING_AI_TOKEN", "__eyJh" + "x" * 100)
@@ -166,7 +170,26 @@ async def test_missing_password_rejected(monkeypatch, tmp_path):
             FakeClient(), html_path=str(existing),
             section_id="s_FAKE", r_account_id="x80",
         )
-    assert "WHOOING_HANACARD_PASSWORD" in ex.value.message
+    assert "WHOOING_CARD_HTML_PASSWORD" in ex.value.message
+
+
+async def test_legacy_password_env_var_still_works(monkeypatch, tmp_path):
+    """v0.1.11: 옛 WHOOING_HANACARD_PASSWORD 도 fallback 으로 인정."""
+    monkeypatch.delenv("WHOOING_CARD_HTML_PASSWORD", raising=False)
+    monkeypatch.setenv("WHOOING_HANACARD_PASSWORD", "legacy123")
+    monkeypatch.setenv("WHOOING_QUEUE_PATH", str(tmp_path / "q.db"))
+    monkeypatch.setenv("WHOOING_AI_TOKEN", "__eyJh" + "x" * 100)
+    # html 파일은 detect 단계까지 도달 → password 통과는 했음을 확인할 다음 에러 단계
+    existing = tmp_path / "fake.html"
+    existing.write_text("<html></html>")  # detect 실패할 빈 HTML
+    with pytest.raises(ToolError) as ex:
+        await import_html_statement(
+            FakeClient(), html_path=str(existing),
+            section_id="s_FAKE", r_account_id="x80",
+        )
+    # password env var 에러가 아닌 issuer detect 에러가 떠야 함 (legacy 가 통과했다는 증거)
+    assert "자동 탐지" in ex.value.message
+    assert "WHOOING_CARD_HTML_PASSWORD" not in ex.value.message
 
 
 async def test_missing_r_account_id_rejected(env_with_password, tmp_path):

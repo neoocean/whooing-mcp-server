@@ -13,7 +13,12 @@ from whooing_mcp.client import WhooingClient
 from whooing_mcp.html_adapters import detect as html_detect
 from whooing_mcp.html_adapters import known_issuers as html_known_issuers
 from whooing_mcp.html_adapters.base import HtmlDecryptError
-from whooing_mcp.html_adapters.hanacard_secure_mail import parse_html_async
+from whooing_mcp.html_adapters.hanacard_secure_mail import (
+    parse_html_async as parse_hanacard_async,
+)
+from whooing_mcp.html_adapters.hyundaicard_secure_mail import (
+    parse_html_async as parse_hyundaicard_async,
+)
 from whooing_mcp.models import ToolError
 from whooing_mcp.tools.pdf_import import (
     _build_account_map,
@@ -31,7 +36,7 @@ async def import_html_statement(
     html_path: str,
     section_id: str,
     r_account_id: str,
-    password_env_var: str = "WHOOING_HANACARD_PASSWORD",
+    password_env_var: str = "auto",
     issuer: str = "auto",
     card_label: str | None = None,
     dedup_tolerance_days: int = 2,
@@ -60,14 +65,24 @@ async def import_html_statement(
             "dry_run=False (실 입력) 시 confirm_insert=True 필수.",
         )
 
+    # ---- 1. password 환경변수 ----
+    # 한국 카드사 (하나/현대/...) 모두 동일한 생년월일 6자리를 보안메일 패스워드로
+    # 사용하므로 issuer 와 무관하게 단일 env 키 (WHOOING_CARD_HTML_PASSWORD) 공유.
+    # backward-compat: 옛 키 (WHOOING_HANACARD_PASSWORD) 도 fallback 으로 인정.
+    if password_env_var == "auto":
+        password_env_var = _default_password_env_var(issuer)
     password = os.getenv(password_env_var, "").strip()
+    if not password and password_env_var == "WHOOING_CARD_HTML_PASSWORD":
+        legacy = os.getenv("WHOOING_HANACARD_PASSWORD", "").strip()
+        if legacy:
+            password = legacy
     if not password:
         raise ToolError(
             "USER_INPUT",
             f"환경변수 {password_env_var!r} 미설정 — .env 에 추가 필요.",
         )
 
-    # ---- 1. issuer detect + 복호화 + 파싱 ----
+    # ---- 2. issuer detect ----
     if issuer == "auto":
         d = html_detect(html_path)
         if d.detected_issuer is None:
@@ -80,10 +95,13 @@ async def import_html_statement(
 
     try:
         if issuer == "hanacard_secure_mail":
-            html_rows = await parse_html_async(html_path, password)
+            html_rows = await parse_hanacard_async(html_path, password)
+        elif issuer == "hyundaicard_secure_mail":
+            html_rows = await parse_hyundaicard_async(html_path, password)
         else:
             raise ToolError(
-                "USER_INPUT", f"async 파서 미구현: {issuer!r} (현재 hanacard_secure_mail 만)"
+                "USER_INPUT",
+                f"async 파서 미구현: {issuer!r} (현재 hanacard / hyundaicard secure_mail).",
             )
     except HtmlDecryptError as ex:
         raise ToolError("USER_INPUT", f"HTML 복호화/파싱 실패: {ex}")
@@ -94,7 +112,7 @@ async def import_html_statement(
             note="HTML 에서 거래 행을 추출하지 못했습니다.",
         )
 
-    # ---- 2. ledger fetch + dedup (PDF import 와 동일) ----
+    # ---- 3. ledger fetch + dedup (PDF import 와 동일) ----
     html_dates = sorted({r.date for r in html_rows})
     fetch_start = html_dates[0]
     fetch_end = html_dates[-1]
@@ -313,6 +331,15 @@ def _empty_envelope_html(html_path, section_id, r_account_id, card_label, issuer
         "proposed": [], "matched_existing": [], "inserted": [], "failed": [],
         "tracking_log_ids": [], "dry_run": dry_run, "note": note,
     }
+
+
+def _default_password_env_var(issuer: str) -> str:
+    """카드사 보안메일 패스워드 env var default — 모든 issuer 가 공통.
+
+    한국 카드사 (하나/현대/삼성/...) 는 모두 사용자 생년월일 6자리를 보안메일
+    패스워드로 사용 → 단일 env 키 (`WHOOING_CARD_HTML_PASSWORD`) 공유.
+    """
+    return "WHOOING_CARD_HTML_PASSWORD"
 
 
 def _track_html(proposals, html_path, section_id, r_account_id, card_label,

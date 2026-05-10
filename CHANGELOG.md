@@ -9,8 +9,46 @@
   결정으로 진행 안 함.)
 * hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (v0.1.10 한계).
 * OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
-* `remove_attachment` 의 P4 sync 보완 (현재 db 만 sync, 삭제된 파일도 함께).
-* Makefile + GitHub Actions CI.
+* 추가 카드사 (삼성/국민/우리/신한) HTML adapter — 현재 하나/현대만.
+
+## v0.1.11 — 2026-05-10
+
+현대카드 HTML 보안메일 (Yettiesoft vestmail) import 지원 + 카드 패스워드
+환경변수 통합 (한국 카드사 모두 생년월일 6자리 공통).
+
+### Added
+
+* `src/whooing_mcp/html_adapters/hyundaicard_secure_mail.py` 신규 — Yettiesoft
+  vestmail (`eval(atob(b_p))`, `doAction()`) 복호화 + 테이블 행 추출.
+* HTML adapter registry 확장: `hanacard_secure_mail` + `hyundaicard_secure_mail`
+  자동 detect (1MB head scan — vestmail 마커는 파일 후반부에 위치).
+* `tests/test_html_import.py::test_legacy_password_env_var_still_works` —
+  옛 키 fallback 검증.
+* `Makefile` + `.github/workflows/ci.yml` — Unreleased 에 있던 항목 v0.1.10
+  마지막 CL 로 흡수, 본 릴리스에서 작동 확인.
+
+### Changed
+
+* `WHOOING_HANACARD_PASSWORD` → `WHOOING_CARD_HTML_PASSWORD` (rename).
+  한국 카드사 모두 사용자 생년월일 6자리 (YYMMDD) 를 보안메일 패스워드로
+  사용 → 카드사별 분리 키 불필요. 옛 키는 자동 fallback 으로 backward-compat
+  유지 (별도 마이그레이션 불필요).
+* `whooing_import_html_statement` 의 `password_env_var` default `auto`
+  (기존 하드코딩 제거).
+* `html_adapters.detect()` 의 head scan 크기 8KB → 1MB.
+* `.env.example` — `WHOOING_CARD_HTML_PASSWORD` 항목 + 설명 추가.
+
+### Why
+
+사용자 요청: "현대카드 HTML 명세서 import 하고 싶다, 그리고 한국 카드사는
+모두 생년월일을 패스워드로 쓰니 키를 통합하라."
+
+### Verified
+
+* pytest -q → 302 passed (300 기존 + 1 신규 + 1 hyundai detect).
+* `make tools` → 24 tools.
+* live decrypt: `/Users/neoocean/Downloads/hyundaicard_20260425.html` 복호화
+  + entries-create (dry_run 으로 사전 검토 후 실 입력).
 
 ## v0.1.10 — 2026-05-10
 

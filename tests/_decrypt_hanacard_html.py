@@ -4,7 +4,8 @@
 whooing_import_html_statement) 로 일반화 가능.
 
 사용:
-    1. .env 에 WHOOING_HANACARD_PASSWORD=... 추가
+    1. .env 에 WHOOING_CARD_HTML_PASSWORD=... 추가
+       (옛 WHOOING_HANACARD_PASSWORD 도 fallback 으로 인식)
     2. python tests/_decrypt_hanacard_html.py /Users/.../hanacard_xxx.html
 
   → /tmp/hanacard-decrypted.html 에 평문 HTML 저장
@@ -96,9 +97,15 @@ async def main(argv: list[str]) -> int:
         print(f"file not found: {html_path}", file=sys.stderr)
         return 2
 
-    password = os.getenv("WHOOING_HANACARD_PASSWORD", "").strip()
+    password = (
+        os.getenv("WHOOING_CARD_HTML_PASSWORD", "").strip()
+        or os.getenv("WHOOING_HANACARD_PASSWORD", "").strip()  # legacy fallback
+    )
     if not password:
-        print("WHOOING_HANACARD_PASSWORD 미설정 — .env 에 추가 후 재시도", file=sys.stderr)
+        print(
+            "WHOOING_CARD_HTML_PASSWORD 미설정 — .env 에 추가 후 재시도",
+            file=sys.stderr,
+        )
         return 2
 
     decrypted = await decrypt(html_path, password)

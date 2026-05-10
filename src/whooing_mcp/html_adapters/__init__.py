@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from whooing_mcp.csv_adapters.base import CSVRow
-from whooing_mcp.html_adapters import hanacard_secure_mail
+from whooing_mcp.html_adapters import hanacard_secure_mail, hyundaicard_secure_mail
 from whooing_mcp.html_adapters.base import HTMLDetectResult
 
 # (issuer_id, is_match_fn, parse_fn)
@@ -23,6 +23,9 @@ _REGISTRY: list[tuple[
     ("hanacard_secure_mail",
      hanacard_secure_mail.is_match,
      hanacard_secure_mail.parse_html),
+    ("hyundaicard_secure_mail",
+     hyundaicard_secure_mail.is_match,
+     hyundaicard_secure_mail.parse_html),
 ]
 
 
@@ -31,9 +34,14 @@ def known_issuers() -> list[str]:
 
 
 def detect(html_path: str) -> HTMLDetectResult:
-    """파일 첫 부분 / 제목 기반으로 issuer 추정 (encrypted 라도 가능 — title 노출됨)."""
+    """파일 전체 (최대 1MB) 를 훑어 issuer 추정 — encrypted 라도 keyword 노출됨.
+
+    이전 (v0.1.10): 8KB 만 봤음. 그러나 vestmail (현대카드) 의 마커
+    (`vestmail`, `doAction`, `b_p`) 는 파일의 후반부에 등장하므로 1MB 까지
+    읽는다. 명세서 HTML 은 보통 100~500KB 이므로 충분.
+    """
     with open(html_path, encoding="utf-8", errors="replace") as f:
-        head = f.read(8192)
+        head = f.read(1_048_576)  # 1 MB
 
     for name, is_match, _ in _REGISTRY:
         if is_match(head):

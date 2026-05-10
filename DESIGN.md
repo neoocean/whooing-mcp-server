@@ -507,14 +507,23 @@ loop + `statement_import_log` 기록 + rate limit (분당 18 self-throttle).
 
 PDF import 와 동일 구조이나:
 
-- 입력 `html_path` + `password_env_var` (default `WHOOING_HANACARD_PASSWORD`)
-- `html_adapters/` 가 Playwright 헤드리스로 client-side 복호화 (CryptoJS AES)
-  → DOM 파싱 → CSVRow 변환 → 이후는 PDF 와 동일.
+- 입력 `html_path` + `password_env_var` (default `auto` →
+  `WHOOING_CARD_HTML_PASSWORD` 사용. 옛 `WHOOING_HANACARD_PASSWORD` fallback)
+- `html_adapters/` 가 Playwright 헤드리스로 client-side 복호화 → DOM 파싱 →
+  CSVRow 변환 → 이후는 PDF 와 동일.
 
-지원 (v0.1.8): `hanacard_secure_mail` (하나카드 보안메일).
+지원 (v0.1.11):
+  - `hanacard_secure_mail` — 하나카드 (CryptoJS AES, `uni_func()`)
+  - `hyundaicard_secure_mail` — 현대카드 (Yettiesoft vestmail, `eval(atob(b_p))`,
+    `doAction()`)
 
-**한계:** 정형 거래 5-cell 패턴 위주. 해외이용내역 상세 (다른 columns) 일부에서
-카드번호가 merchant 로 잡히는 케이스. 후속 CL 에서 섹션 detection + layout 분기.
+**패스워드 정책:** 한국 카드사 모두 사용자 생년월일 6자리 (YYMMDD) 를 보안메일
+패스워드로 사용 → 단일 env 키 (`WHOOING_CARD_HTML_PASSWORD`) 공유. 카드사별
+분리 키 불필요.
+
+**한계:** 정형 거래 패턴 위주. 해외이용내역 상세 (다른 columns) 일부에서
+카드번호가 merchant 로 잡히는 케이스. 새 카드사는 `html_adapters/` 에 issuer
+별 모듈 추가 + `__init__.py` registry 등록.
 
 #### §6.8.3 `whooing_delete_entries`
 
@@ -585,7 +594,7 @@ JSON Schema, launchd 통합 패턴 정착.
 | `WHOOING_HTTP_TIMEOUT` | △ | 기본 10초 |
 | `WHOOING_LOG_LEVEL` | △ | `INFO` |
 | `WHOOING_RPM_CAP` | △ | client-side rate cap (기본 20) |
-| `WHOOING_HANACARD_PASSWORD` | △ | `whooing_import_html_statement` 가 사용 (하나카드 보안메일) |
+| `WHOOING_CARD_HTML_PASSWORD` | △ | `whooing_import_html_statement` 가 사용. 한국 카드사 (하나/현대/...) 모두 공통 — 생년월일 6자리 (YYMMDD). 옛 `WHOOING_HANACARD_PASSWORD` 도 backward-compat fallback |
 | `WHOOING_QUEUE_PATH` | △ | SQLite db override (default `<project>/whooing-data.sqlite`) |
 | `WHOOING_CONFIG` | △ | TOML 옵션 파일 override |
 
