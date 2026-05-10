@@ -1,0 +1,56 @@
+name: CI
+
+# v0.1.10 — push/PR 마다 unit test 자동 실행.
+# 환경: ubuntu-latest, Python 3.12.
+# 자격증명 (WHOOING_AI_TOKEN 등) 없음 — 모든 테스트는 mock + tmp_path 격리.
+# config (whooing-mcp.toml) 없음 → p4_sync 자동 skip (default false).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # 수동 트리거
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-1217
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Chromium for Playwright
+        run: playwright install chromium --with-deps
+
+      - name: Run pytest
+        env:
+          # CI 에서 모든 외부 호출 mock 전제. 테스트는 .env / tomml 자동 탐색하지만
+          # 둘 다 없는 게 정상 (config disabled default).
+          WHOOING_LOG_LEVEL: WARNING
+        run: pytest -q
+
+      - name: Tool registration smoke
+        run: |
+          python -c "from whooing_mcp.server import build_mcp; import asyncio; \
+            m = build_mcp(); tools = asyncio.run(m.list_tools()); \
+            print(f'{len(tools)} tools'); \
+            assert len(tools) >= 24, f'expected >= 24 tools, got {len(tools)}'"
