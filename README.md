@@ -86,8 +86,10 @@ flowchart TB
 | `whooing_list_hashtags` | 모든 unique 해시태그 + 사용 횟수 (prefix 필터) | (없음) |
 | `whooing_find_entries_by_hashtag` | **역방향:** 해시태그 → 후잉 거래 fetch + 메모/태그 부착 | GET /entries |
 
-저장 위치: 본 프로젝트의 `whooing-data.sqlite` (또는 `$WHOOING_QUEUE_PATH`
-override). 후잉 서버의 `memo` 필드는 **변경하지 않음** — 별개의 로컬 레이어.
+저장 위치 (v0.2.0+): `~/.whooing/whooing-data.sqlite` 가 default — `$WHOOING_DATA_DIR`
+로 root 변경, `$WHOOING_QUEUE_PATH` 로 직접 path 지정 가능. whooing-tui 와 같은
+db 를 공유 (TUI 가 owner, wrapper 는 read-only). 옛 `<project>/whooing-data.sqlite`
+도 backward-compat (경고 메시지와 함께 동작 — Phase 5.1 의 migration script 권장).
 
 ### 거래 ↔ 첨부파일 (3) — 후잉 미지원 영역 보완
 

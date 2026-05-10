@@ -26,21 +26,42 @@ SCHEMA_VERSION = 4
 def default_queue_path() -> Path:
     """SQLite db 위치.
 
-    우선순위:
-      1. $WHOOING_QUEUE_PATH (override)
-      2. <project root>/whooing-data.sqlite
-         (cross-machine sync via P4 — DESIGN §13.2 정책)
+    우선순위 (v0.2.0):
+      1. $WHOOING_QUEUE_PATH                       (legacy explicit override)
+      2. $WHOOING_DATA_DIR/whooing-data.sqlite     (NEW — TUI 와 공유 path)
+      3. ~/.whooing/whooing-data.sqlite            (NEW default — TUI 와 합의)
+      4. <project root>/whooing-data.sqlite        (legacy fallback + warning)
 
-    이전 (CL 50660) default 였던 ~/.local/share/whooing-mcp/queue.db 는
-    각 머신 격리 — cross-machine sync 안 됨. 사용자가 .env 에서 override
-    하지 않는 한 본 default 가 P4 와 자동 연동됨.
+    `WHOOING_DATA_DIR` 는 whooing-tui 와 합의된 단일 root. 같은 machine 의
+    두 앱 (wrapper, tui) 이 같은 db / attachments 를 본다.
     """
+    import sys
     explicit = os.getenv("WHOOING_QUEUE_PATH")
     if explicit:
         return Path(explicit).expanduser()
-    # __file__ = src/whooing_mcp/queue.py → parents[2] = project root
+
+    data_dir = os.getenv("WHOOING_DATA_DIR")
+    if data_dir:
+        return Path(data_dir).expanduser() / "whooing-data.sqlite"
+
+    new_default = Path("~/.whooing/whooing-data.sqlite").expanduser()
+    if new_default.exists():
+        return new_default
+
+    # Legacy fallback — only if user has an existing project-local db
     project_root = Path(__file__).resolve().parents[2]
-    return project_root / "whooing-data.sqlite"
+    legacy = project_root / "whooing-data.sqlite"
+    if legacy.exists():
+        print(
+            f"[whooing-mcp-server] WARNING: 옛 위치의 db 사용 중 ({legacy}).\n"
+            f"  마이그레이션 권장 — `mv {legacy} {new_default}` 후 "
+            f"`WHOOING_DATA_DIR=~/.whooing` 설정. (또는 무동작 — 본 경고 무시)",
+            file=sys.stderr,
+        )
+        return legacy
+
+    # 새 default — db 가 아예 없으면 (TUI 가 곧 init) 새 path 반환.
+    return new_default
 
 
 def _now_iso() -> str:
