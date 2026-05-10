@@ -24,7 +24,8 @@ flowchart TB
 
 ## 목차
 
-- [wrapper 도구 24개](#wrapper-도구-24개)
+- [wrapper 도구 14개 (v0.2.0)](#wrapper-도구-14개-v020)
+- [관련 프로젝트](#관련-프로젝트)
 - [Quickstart (5분)](#quickstart-5분)
   - [1. AI 연동 토큰 발급](#1-ai-연동-토큰-발급)
   - [2. 공식 후잉 MCP 등록](#2-공식-후잉-mcp-등록)
@@ -32,18 +33,19 @@ flowchart TB
 - [도구 reference](#도구-reference)
 - [`[ai]` 마커 컨벤션 — 중요](#ai-마커-컨벤션--중요)
 - [워크플로우 예시](#워크플로우-예시)
-  - [매일: SMS 알림 → 입력](#매일-sms-알림--입력)
-  - [주간: audit + dedup](#주간-audit--dedup)
-  - [매월: 카드명세서 reconcile](#매월-카드명세서-reconcile)
-  - [매월: PDF/HTML 명세서 자동 import + 정리](#매월-pdfhtml-명세서-자동-import--정리)
-  - [거래에 메모·해시태그 달기 + 태그로 역조회](#거래에-메모해시태그-달기--태그로-역조회)
+- [v0.2.0 으로 업그레이드 하기](#v020-으로-업그레이드-하기)
 - [트러블슈팅](#트러블슈팅)
 - [개발](#개발)
 - [참고 / 라이선스](#참고--라이선스)
 
 ---
 
-## wrapper 도구 24개
+## wrapper 도구 14개 (v0.2.0)
+
+> **v0.2.0 변경**: 이전 24 도구 중 statement import / 첨부 / 메모/태그 영역
+> 10 도구는 [whooing-tui](https://github.com/neoocean/whooing-tui) 로 이전.
+> wrapper 는 LLM 자동화 / audit / categorize / pending queue 에 집중.
+> 자세한 마이그레이션은 ↓ "[v0.2.0 으로 업그레이드 하기](#v020-으로-업그레이드-하기)".
 
 ### 후잉 read-only 도구 (7)
 
@@ -72,64 +74,34 @@ flowchart TB
 | `whooing_confirm_pending` | 후잉에 입력 완료 → 큐 항목 삭제 | (없음) |
 | `whooing_dismiss_pending` | 입력 안 함 → 큐 항목 삭제 (의미 구분) | (없음) |
 
-### 로컬 메모 + 해시태그 (5) — 후잉 자체 memo 보완
-
-후잉 자체 `memo` 가 한 줄짜리 + 해시태그 검색이 부족한 부분을 로컬에서 보완.
-거래 ID 별로 자유 길이의 `note` 와 다중 `hashtags` 를 보관하고, 거래 조회
-시 자동 부착 + 해시태그로 역방향 조회.
-
-| 도구 | 한 줄 설명 | API |
-|---|---|---|
-| `whooing_set_entry_note` | 거래 ID 에 로컬 메모/해시태그 저장 (note + hashtags) | (없음) |
-| `whooing_get_entry_annotations` | 한 개 또는 여러 entry_id 의 로컬 메모/태그 조회 | (없음) |
-| `whooing_remove_entry_note` | 특정 거래의 로컬 메모/태그 삭제 | (없음) |
-| `whooing_list_hashtags` | 모든 unique 해시태그 + 사용 횟수 (prefix 필터) | (없음) |
-| `whooing_find_entries_by_hashtag` | **역방향:** 해시태그 → 후잉 거래 fetch + 메모/태그 부착 | GET /entries |
-
-저장 위치 (v0.2.0+): `~/.whooing/whooing-data.sqlite` 가 default — `$WHOOING_DATA_DIR`
-로 root 변경, `$WHOOING_QUEUE_PATH` 로 직접 path 지정 가능. whooing-tui 와 같은
-db 를 공유 (TUI 가 owner, wrapper 는 read-only). 옛 `<project>/whooing-data.sqlite`
-도 backward-compat (경고 메시지와 함께 동작 — Phase 5.1 의 migration script 권장).
-
-### 거래 ↔ 첨부파일 (3) — 후잉 미지원 영역 보완
-
-후잉이 entry-attachment 미지원이라 본 wrapper 가 별도 layer 운영. PDF
-인보이스 / 영수증 사진 / 계약서 등을 거래 ID 에 1:N 으로 연결.
-
-| 도구 | 한 줄 설명 | 부수효과 |
-|---|---|---|
-| `whooing_attach_file_to_entry` | 파일을 거래에 첨부 (디스크 복사 + sha256 dedup + db 기록) | 디스크 + db + (자동 P4 sync — db + 파일 한 CL) |
-| `whooing_list_entry_attachments` | 한 개 / 여러 entry 의 첨부파일 조회 | (없음) |
-| `whooing_remove_attachment` | 첨부 row 제거 + (옵션) 디스크 파일 삭제 | db + (옵션) 파일 |
-
-저장 구조: `attachments/files/YYYY/YYYY-MM-DD/<original-filename>`. 같은
-sha256 은 디스크 한 번만 (다른 entry 가 참조해도 reuse).
-
-`audit` + `find_entries_by_hashtag` 응답에 `local_attachments` 필드가 자동
-부착됨 (`local_annotations` 와 같은 패턴).
-
-### 명세서 자동 import + cleanup (3) — 공식 MCP chained call
-
-기존 read-only 정책의 **부분 예외** — 거래 입력/삭제가 필요하지만 wrapper
-가 직접 후잉 REST 를 두드리지 않고 **공식 MCP 의 `entries-create` /
-`entries-delete` 도구를 chained-call**. 모두 `confirm` 또는 `dry_run`
-가드 + `statement_import_log` audit trail.
+### 거래 변경 (1) — 공식 MCP chained call
 
 | 도구 | 한 줄 설명 | 거래 변경? |
 |---|---|---|
-| `whooing_import_pdf_statement` | PDF 카드명세서 → 자동 dedup + categorize + insert | 공식 MCP entries-create |
-| `whooing_import_html_statement` | HTML 보안메일 (CryptoJS AES, Playwright 헤드리스 복호화) → import | 공식 MCP entries-create |
-| `whooing_delete_entries` | 거래 ID 들 영구 삭제 | 공식 MCP entries-delete |
+| `whooing_delete_entries` | 거래 ID 들 영구 삭제 (`confirm=True` 가드) | 공식 MCP entries-delete |
 
-월말 정산 (`whooing_monthly_close`) — audit + dedup + reconcile + 합계 합성:
+### 월말 정산 (1)
 
 | 도구 | 한 줄 설명 | API |
 |---|---|---|
 | `whooing_monthly_close` | 한 달치: 통계 + audit + dedup + reconcile (CSV 또는 PDF) | GET /entries |
 
-**24개 도구 합계.** 거래 변경 도구 (`whooing_delete_entries`, `whooing_import_*_statement`)
-3개 + 첨부파일 변경 (`whooing_attach_file_to_entry`, `whooing_remove_attachment`)
-2개 외 모두 read-only.
+**14개 도구 합계.** `whooing_delete_entries` 외 모두 read-only.
+
+### Read-only augmentation (자동 부착)
+
+`whooing_audit_recent_ai_entries` 응답의 각 entry 에는 `local_annotations`
+(메모 + 해시태그) 와 `local_attachments` (첨부파일 목록) 필드가 자동 부착.
+실제 데이터는 [whooing-tui](https://github.com/neoocean/whooing-tui) 가 SQLite
+db (공유 path: `~/.whooing/whooing-data.sqlite`) 에 write — wrapper 는 SELECT 만.
+
+## 관련 프로젝트
+
+| repo | 책임 |
+|---|---|
+| [whooing-tui](https://github.com/neoocean/whooing-tui) | Textual TUI — statement import (HTML/PDF), 첨부파일 관리, 메모/해시태그 작성. SQLite db + attachments 의 owner. |
+| 본 repo (whooing-mcp-server-wrapper) | LLM (Claude / 다른 MCP host) 자동화 도구. db read-only consumer. |
+| `whooing-tui/core/` (whooing-core 패키지) | 두 프로젝트가 공유하는 어댑터 / SQLite 스키마 / 첨부 storage. |
 
 ---
 
@@ -395,7 +367,21 @@ CSV 헤더만 보고 카드사 추측 (디버깅용).
 
 `reconcile_csv` 가 `issuer=auto` 로 매칭 실패할 때 사용.
 
-### `whooing_set_entry_note` / `whooing_get_entry_annotations` / `whooing_remove_entry_note`
+### (제거됨 in v0.2.0) annotation / hashtag / 첨부 / import 도구
+
+다음 10 도구는 v0.1.x 까지 본 wrapper 의 일부였으나 v0.2.0 부터
+[whooing-tui](https://github.com/neoocean/whooing-tui) 가 owner:
+`whooing_set_entry_note` / `whooing_get_entry_annotations` /
+`whooing_remove_entry_note` / `whooing_list_hashtags` /
+`whooing_find_entries_by_hashtag` / `whooing_attach_file_to_entry` /
+`whooing_list_entry_attachments` / `whooing_remove_attachment` /
+`whooing_import_html_statement` / `whooing_import_pdf_statement`.
+
+본 wrapper 는 동일 SQLite db 에 read-only 로 SELECT 해서 `audit` 응답에
+`local_annotations` + `local_attachments` 필드를 자동 부착 (↓ 참고).
+
+<details>
+<summary>참고: 옛 도구 reference 보존 (v0.1.x 사용자용)</summary>
 
 후잉 거래 ID 별 **로컬 메모 + 해시태그** 저장. 후잉 자체 `memo` 필드는
 한 줄짜리 + 해시태그 검색 부재라 본 도구로 보완. 본 wrapper 의 로컬 SQLite
@@ -547,6 +533,8 @@ remove_attachment 입력: attachment_id (int), delete_file=True
 > "entry 1710716 의 첨부파일 목록 보여줘"
 > "attachment id=5 지워줘 (디스크 파일도 같이)"
 
+</details>
+
 ### `local_annotations` + `local_attachments` 자동 부착
 
 `whooing_audit_recent_ai_entries` / `whooing_find_entries_by_hashtag` 의
@@ -580,8 +568,8 @@ remove_attachment 입력: attachment_id (int), delete_file=True
 
 로컬 데이터 없는 entry 는 `local_annotations: null` / `local_attachments: []`.
 (find_duplicates / reconcile / monthly_close 등은 응답 크기 제어 위해 자동
-부착 안 함 — 필요 시 별도 `whooing_get_entry_annotations` 또는
-`whooing_list_entry_attachments` 호출.)
+부착 안 함. 직접 조회가 필요하면 [whooing-tui](https://github.com/neoocean/whooing-tui)
+의 entry annotator / attachment browser 화면 사용.)
 
 ---
 
@@ -745,6 +733,44 @@ sequenceDiagram
    > "5건 누락 발견. 다음과 같아: ... 다 입력할까?"
 6. 사용자 "응" → Claude 가 5번 `add_entry` (각 memo `[ai] CSV 정산`)
 7. extra 2건은 사용자가 수동 확인 (환불/현금/타카드 가능성)
+
+---
+
+## v0.2.0 으로 업그레이드 하기
+
+v0.1.x 에서 v0.2.0 으로 올리는 절차:
+
+1. **whooing-core / whooing-tui 클론 + install** (sibling monorepo):
+   ```bash
+   cd ../  # scripts/ 로
+   git clone https://github.com/neoocean/whooing-tui.git
+   cd whooing-tui
+   make install   # core + tui 모두 editable
+   ```
+
+2. **wrapper 업데이트 + 재설치**:
+   ```bash
+   cd ../whooing-mcp-server
+   git pull
+   make install   # whooing-core 가 sibling 에서 자동 install
+   ```
+
+3. **데이터 path 마이그레이션** (옛 `<project>/whooing-data.sqlite` 사용 중이면):
+   ```bash
+   python tools/migrate-to-shared-data-dir.py            # dry-run
+   python tools/migrate-to-shared-data-dir.py --confirm  # 실 mv
+   ```
+   결과: `~/.whooing/whooing-data.sqlite` + `~/.whooing/attachments/` 로 이동.
+
+4. **Claude Desktop / Code 재시작**: 도구 목록이 14 로 갱신됨. statement
+   import / 첨부 / 메모/태그 관련 명령은 더 이상 LLM 으로 호출 불가 — 대신
+   `whooing-tui` 터미널에서 처리.
+
+5. **`.env` 수정 권장** (선택):
+   ```diff
+   + WHOOING_DATA_DIR=~/.whooing
+   - WHOOING_QUEUE_PATH=...     # 옛 explicit override 가 있었으면 제거
+   ```
 
 ---
 

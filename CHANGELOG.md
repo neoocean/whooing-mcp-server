@@ -7,9 +7,61 @@
 
 * (P3 항목 — IMAP 메일 폴링 / 후잉 webhook 수신 / Telegram 예산 알람 — 사용자
   결정으로 진행 안 함.)
-* hanacard_secure_mail 파서의 해외이용내역 섹션 layout 분기 (v0.1.10 한계).
-* OCR PDF adapter (이미지 PDF 지원 — 현재 텍스트 추출 가능 PDF 만).
-* 추가 카드사 (삼성/국민/우리/신한) HTML adapter — 현재 하나/현대만.
+* (어댑터 / 첨부 layer 추가 항목 — whooing-tui 의 monorepo `core/` 에서 진행)
+
+## v0.2.0 — 2026-05-10
+
+**Breaking** — wrapper 에서 user-facing flow (statement import / 첨부 / 메모/태그)
+도구 10 개 제거. 해당 영역은 신규 monorepo
+[whooing-tui](https://github.com/neoocean/whooing-tui) 가 가져감. wrapper 는 LLM
+자동화 / audit / categorize / pending queue 에 집중.
+
+### Removed (10 도구)
+
+* `whooing_set_entry_note`, `whooing_get_entry_annotations`, `whooing_remove_entry_note`
+* `whooing_list_hashtags`, `whooing_find_entries_by_hashtag`
+* `whooing_import_html_statement`, `whooing_import_pdf_statement`
+* `whooing_attach_file_to_entry`, `whooing_list_entry_attachments`, `whooing_remove_attachment`
+
+→ 24 → **14 도구** (`whooing_audit_recent_ai_entries`, `whooing_parse_payment_sms`,
+`whooing_find_duplicates`, `whooing_reconcile_csv`/`pdf`,
+`whooing_csv_format_detect`, `whooing_pdf_format_detect`,
+`whooing_suggest_category`, `whooing_enqueue_pending`/`list`/`confirm`/`dismiss`,
+`whooing_delete_entries`, `whooing_monthly_close`).
+
+### Changed
+
+* **신규 환경변수 `WHOOING_DATA_DIR`** (default `~/.whooing/`) — whooing-tui 와
+  같은 db / attachments 공유. 옛 `<project>/whooing-data.sqlite` 도 backward-compat
+  (경고와 함께 동작). migration 도구 제공:
+  `python tools/migrate-to-shared-data-dir.py [--confirm]`.
+* **어댑터 (html / csv / pdf) 와 storage 가 whooing-core 로 이전.** wrapper 는
+  `pip install whooing-core` (sibling monorepo `whooing-tui/core`) 로 가져옴.
+  로컬 사본 / 중복 테스트 모두 제거.
+* **annotation / hashtag / entry_attachments 테이블은 wrapper read-only.**
+  `whooing_mcp.queue.open_db_ro()` 가 `mode=ro` URI 강제. wrapper write 시도 시
+  `OperationalError`. graceful degradation — TUI 가 schema init 안 했어도 빈
+  `local_annotations` 반환.
+* `whooing_mcp.{annotations,attachments}.py` 는 read-only helper 만 (각 71 lines).
+  CRUD 는 모두 whooing-core 또는 TUI 가 owner.
+
+### Fixed
+
+* (v0.1.12 의 P4 빈 CL leak 방지가 본 release 에 그대로 효력.)
+
+### Migration
+
+1. `pip install -e ../whooing-tui/core` (sibling) 또는 `pip install -e .` 로
+   git+https 의존성 자동 fetch.
+2. `python tools/migrate-to-shared-data-dir.py` 로 dry-run 후 `--confirm`.
+3. statement import / 첨부 / 메모는 [whooing-tui](https://github.com/neoocean/whooing-tui)
+   의 TUI 화면에서 수행.
+
+### Verified
+
+* pytest -q                    → 188 passed (down from 271 — 83 tests 이전됨).
+* make tools                   → 14 tools registered.
+* migration script (dry-run)   → 옛 db + attachments 감지 + 새 path 출력.
 
 ## v0.1.12 — 2026-05-10
 
